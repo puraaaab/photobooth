@@ -1,11 +1,14 @@
 import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Printer, Copy, Check, Minus, Plus, ArrowRight, X, Sparkles } from 'lucide-react'
+import { EXTRA_SHEET_PRICE, STRIPS_PER_SHEET } from '@/constants/pricing'
 
 interface PrintCopiesModalProps {
   isOpen: boolean
   stripCount: number
   initialCopies?: number
+  /** Strips the guest's ticket already covers; copies beyond it are shown with their price. */
+  includedStrips?: number
   onConfirm: (copies: number) => void
   onClose: () => void
 }
@@ -14,6 +17,7 @@ export function PrintCopiesModal({
   isOpen,
   stripCount,
   initialCopies = 1,
+  includedStrips,
   onConfirm,
   onClose,
 }: PrintCopiesModalProps) {
@@ -23,18 +27,31 @@ export function PrintCopiesModal({
 
   const totalPrints = stripCount * copies
 
+  // Price shown up front (no surprise at the printer): one A5 sheet = 2 strips, extra sheets cost
+  // EXTRA_SHEET_PRICE each and are paid on the print screen.
+  const extraPriceFor = (n: number): number | null => {
+    if (includedStrips === undefined) return 0
+    const physical = Math.ceil((Math.max(1, stripCount) * n) / STRIPS_PER_SHEET) * STRIPS_PER_SHEET
+    const extraSheets = Math.max(0, Math.ceil((physical - includedStrips) / STRIPS_PER_SHEET))
+    return extraSheets > 2 ? null : extraSheets * EXTRA_SHEET_PRICE   // null = more than the largest plan
+  }
+  const priceLabel = (n: number) => {
+    const p = extraPriceFor(n)
+    return p === null ? 'ask staff' : p === 0 ? 'included' : `+₹${p}`
+  }
+
   const presetOptions = [
     {
       count: 1,
       label: 'Single Print',
-      sublabel: `${stripCount} strip${stripCount !== 1 ? 's' : ''} total`,
+      sublabel: `${stripCount} strip${stripCount !== 1 ? 's' : ''} total · ${priceLabel(1)}`,
       desc: '1 copy of each strip',
       badge: 'Standard',
     },
     {
       count: 2,
       label: 'Double Print',
-      sublabel: `${stripCount * 2} strips total`,
+      sublabel: `${stripCount * 2} strips total · ${priceLabel(2)}`,
       desc: '2 copies of each strip',
       badge: 'Popular',
       hint: 'One for you, one for a friend!',
@@ -42,14 +59,14 @@ export function PrintCopiesModal({
     {
       count: 3,
       label: '3 Copies',
-      sublabel: `${stripCount * 3} strips total`,
+      sublabel: `${stripCount * 3} strips total · ${priceLabel(3)}`,
       desc: '3 copies of each strip',
       badge: null,
     },
     {
       count: 4,
       label: '4 Copies',
-      sublabel: `${stripCount * 4} strips total`,
+      sublabel: `${stripCount * 4} strips total · ${priceLabel(4)}`,
       desc: '4 copies of each strip',
       badge: 'Party Pack',
     },
@@ -440,7 +457,7 @@ export function PrintCopiesModal({
                 gap: 8,
               }}
             >
-              <span>CONTINUE WITH {totalPrints} STRIP{totalPrints !== 1 ? 'S' : ''} ({copies} {copies === 1 ? 'COPY' : 'COPIES'})</span>
+              <span>CONTINUE WITH {totalPrints} STRIP{totalPrints !== 1 ? 'S' : ''} ({copies} {copies === 1 ? 'COPY' : 'COPIES'}){extraPriceFor(copies) ? ` · +₹${extraPriceFor(copies)}` : ''}</span>
               <ArrowRight size={14} />
             </button>
           </div>

@@ -82,3 +82,15 @@ export function upgradeOffersFor(planPrice: number): UpgradeOffer[] {
   }
   return offers
 }
+
+/**
+ * Plan a payment actually buys. A new pass: the amount must equal a plan price. An upgrade: every
+ * EXTRA_SHEET_PRICE paid adds one A5 sheet (2 strips) to the current plan. Used by the server so the
+ * plan sent by a browser can never exceed what was paid.
+ */
+export function planFromPayment(currentPlan: number | undefined, paidRupees: number, isUpgrade: boolean): number | undefined {
+  if (!isUpgrade) return isValidPlan(paidRupees) ? paidRupees : undefined
+  const extraSheets = Math.floor(paidRupees / EXTRA_SHEET_PRICE)
+  const strips = stripLimitForPlan(currentPlan) + extraSheets * STRIPS_PER_SHEET
+  return PLANS.find(pl => pl.strips === strips)?.price
+}

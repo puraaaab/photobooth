@@ -193,6 +193,8 @@ export function WaitingScreen({
       const newTicket = await useQueueStore.getState().issueTicket({ customerName: 'Walk-in Guest' })
       setTicketCode(newTicket.code)
       await verifyTicketCode(newTicket.code)
+    } catch {
+      setTicketError('Walk-in passes are sold at the ticket desk. Please ask staff.')
     } finally {
       setIsVerifying(false)
     }

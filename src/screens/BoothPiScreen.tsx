@@ -411,7 +411,7 @@ export function BoothPiScreen() {
       for (const endpoint of candidateEndpoints) {
         try {
           const r = await fetch(endpoint, { signal: controller.signal })
-          if (r.ok || r.status === 404 || r.status === 400) {
+          if (r.ok || r.status === 404 || r.status === 400 || r.status === 429) {
             res = r
             successfulBase = endpoint.replace(/\/api\/tickets\/.*$/, '')
             break
@@ -420,6 +420,12 @@ export function BoothPiScreen() {
       }
       clearTimeout(timeoutId)
 
+      if (res && res.status === 429) {
+        const d = await res.json().catch(() => ({}))
+        setErrorMsg(d.error || 'Too many wrong codes. Please wait a few minutes or ask staff.')
+        setState('ticket_entry')
+        return
+      }
       if (!res || !res.ok) {
         setErrorMsg('Ticket not found. Please check your ticket code.')
         setState('ticket_entry')
@@ -448,7 +454,7 @@ export function BoothPiScreen() {
         setState('ticket_entry')
         return
       }
-      if (ticket.paymentMethod === 'CASH' && ticket.paymentStatus !== 'PAID') {
+      if (ticket.paymentStatus !== 'PAID') {
         setErrorMsg(`⚠️ Payment Due: Please pay ₹${ticket.paymentAmount ?? ticket.planType ?? 99} at the counter before starting.`)
         setState('ticket_entry')
         return
@@ -477,7 +483,7 @@ export function BoothPiScreen() {
         body: JSON.stringify({ status: 'IN_BOOTH', sessionId: newSessionId }),
         signal: AbortSignal.timeout(4000),
       }).catch(() => null)
-      if (statusRes && statusRes.status === 409) {
+      if (statusRes && (statusRes.status === 409 || statusRes.status === 402)) {
         const d = await statusRes.json().catch(() => ({}))
         setErrorMsg(d.error || `Ticket #${code} cannot be used again.`)
         setState('ticket_entry')

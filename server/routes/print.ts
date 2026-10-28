@@ -75,6 +75,79 @@ export async function autoSetupPrinter(): Promise<void> {
   }
 }
 
+
+// ─── Quota shared by network printing (/job) and AirPrint (/authorize) ───────
+// A ticket buys `stripLimitForPlan(plan)` physical strips in total, across every print and reprint.
+// Without a ticket, unpaid, over the plan or a reprint → only with staff (laptop or X-Staff-Pin).
+type QuotaResult =
+  | { ok: false; status: number; body: Record<string, unknown> }
+  | { ok: true; ticket: ReturnType<NonNullable<ReturnType<typeof getTicketManager>>['getTicketById']>; key: string; used: number; staff: boolean; ledger: Ledger }
+
+function checkPrintQuota(req: Request, ticketId: unknown, strips: number): QuotaResult {
+  const manager = getTicketManager()
+  const ticket = typeof ticketId === 'string' && ticketId ? (manager?.getTicketById(ticketId) || manager?.getTicketByCode(ticketId)) : undefined
+  const staff = isStaff(req)
+  if (!ticket && !staff) {
+    return { ok: false, status: 403, body: { error: 'Printing without a ticket needs staff approval', code: 'STAFF_REQUIRED' } }
+  }
+  const ledger = loadLedger()
+  const key = ticket?.id || 'staff-walkin'
+  const used = ledger[key]?.strips || 0
+  if (ticket && !staff) {
+    if (ticket.paymentStatus !== 'PAID') {
+      return { ok: false, status: 402, body: { error: `Ticket #${ticket.code} is not paid yet`, code: 'UNPAID' } }
+    }
+    if (ticket.status === 'CANCELLED') {
+      return { ok: false, status: 403, body: { error: `Ticket #${ticket.code} was cancelled`, code: 'CANCELLED' } }
+    }
+    const allowance = stripLimitForPlan(ticket.planType)
+    if (used + strips > allowance) {
+      return {
+        ok: false, status: 403,
+        body: {
+          error: `Ticket #${ticket.code} covers ${allowance} strips and ${used} were already printed.`,
+          code: used > 0 ? 'REPRINT_NEEDS_STAFF' : 'OVER_PLAN',
+          allowance, used,
+        },
+      }
+    }
+  }
+  return { ok: true, ticket, key, used, staff, ledger }
+}
+
+function recordPrint(ledger: Ledger, key: string, used: number, strips: number, sheets: number) {
+  ledger[key] = { strips: used + strips, sheets: (ledger[key]?.sheets || 0) + sheets, jobs: (ledger[key]?.jobs || 0) + 1 }
+  saveLedger(ledger)
+}
+
+// ─── POST /api/print/authorize — AirPrint mode ───────────────────────────────
+// The iPad prints through the iOS dialog, so the server can't send the job — but it still decides
+// whether this ticket may print now, and records it, so re-entering the screen can't reprint for free.
+printRouter.post('/authorize', (req: Request, res: Response) => {
+  const { ticketId, sessionId, stripCount, sheetCount } = req.body || {}
+  const strips = Number(stripCount)
+  const sheets = Number(sheetCount ?? 1)
+  if (!Number.isInteger(strips) || strips < 1 || strips > 24 || !Number.isInteger(sheets) || sheets < 1 || sheets > 12) {
+    return res.status(400).json({ error: 'stripCount must be 1–24 and sheetCount 1–12' })
+  }
+  if (ticketId !== undefined && ticketId !== null && !isSafeId(ticketId)) {
+    return res.status(400).json({ error: 'Invalid ticket ID' })
+  }
+  if (sessionId !== undefined && sessionId !== null && !isSafeId(sessionId)) {
+    return res.status(400).json({ error: 'Invalid session ID' })
+  }
+  const q = checkPrintQuota(req, ticketId, strips)
+  if (q.ok === false) return res.status(q.status).json(q.body)
+  recordPrint(q.ledger, q.key, q.used, strips, sheets)
+  const manager = getTicketManager()
+  if (q.ticket && manager) {
+    const updated = manager.updateTicketStatus(q.ticket.id, q.ticket.status === 'COMPLETED' ? 'COMPLETED' : 'PRINTING', { sessionId: sessionId || undefined })
+    if (updated) io?.emit('ticket:updated', updated)
+  }
+  getDatabase()?.logAudit('PRINT_AUTHORIZED', q.ticket?.code, sessionId, { strips, sheets, byStaff: q.staff, mode: 'airprint' })
+  res.json({ success: true, printedStrips: q.used + strips })
+})
+
 // ─── GET /api/print/status ───────────────────────────────────────────────────
 printRouter.get('/status', async (_req: Request, res: Response) => {
   const cfg = loadPrinterConfig(getDataPath())
@@ -153,28 +226,10 @@ printRouter.post('/job', async (req: Request, res: Response) => {
   }
 
   // ─── Quota ──
+  const q = checkPrintQuota(req, ticketId, strips)
+  if (q.ok === false) return res.status(q.status).json(q.body)
+  const { ticket, key, used, staff, ledger } = q
   const manager = getTicketManager()
-  const ticket = ticketId ? (manager?.getTicketById(ticketId) || manager?.getTicketByCode(ticketId)) : undefined
-  const staff = isStaff(req)
-  if (!ticket && !staff) {
-    return res.status(403).json({ error: 'Printing without a ticket needs staff approval', code: 'STAFF_REQUIRED' })
-  }
-  const ledger = loadLedger()
-  const key = ticket?.id || 'staff-walkin'
-  const used = ledger[key]?.strips || 0
-  if (ticket) {
-    if (ticket.paymentStatus !== 'PAID' && !staff) {
-      return res.status(402).json({ error: `Ticket #${ticket.code} is not paid yet`, code: 'UNPAID' })
-    }
-    const allowance = stripLimitForPlan(ticket.planType)
-    if (used + strips > allowance && !staff) {
-      return res.status(403).json({
-        error: `Ticket #${ticket.code} covers ${allowance} strips and ${used} were already printed.`,
-        code: used > 0 ? 'REPRINT_NEEDS_STAFF' : 'OVER_PLAN',
-        allowance, used,
-      })
-    }
-  }
 
   const info = await currentPrinter(true)
   if (!info) {
@@ -186,8 +241,7 @@ printRouter.post('/job', async (req: Request, res: Response) => {
 
   try {
     const { jobs, format } = await printSheets(info, jpegs, `Photobooth ${ticket ? '#' + ticket.code : 'staff'}`)
-    ledger[key] = { strips: used + strips, sheets: (ledger[key]?.sheets || 0) + jpegs.length, jobs: (ledger[key]?.jobs || 0) + 1 }
-    saveLedger(ledger)
+    recordPrint(ledger, key, used, strips, jpegs.length)
     if (ticket && manager) {
       const updated = manager.updateTicketStatus(ticket.id, ticket.status === 'COMPLETED' ? 'COMPLETED' : 'PRINTING', { sessionId: sessionId || undefined })
       if (updated) io?.emit('ticket:updated', updated)

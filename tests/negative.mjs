@@ -185,6 +185,22 @@ for (let i = 0; i < 5; i++) await req('POST', '/api/staff/verify', { headers: { 
 r = await req('POST', '/api/staff/verify', { headers: { 'X-Forwarded-For': '192.168.1.77', 'X-Staff-Pin': PIN } })
 check('Staff PIN brute force locks out after 5 tries', r.status === 403, r.status)
 
+// ── Ticket code guessing lockout ────────────────────────────────────────────
+const GUESSER = { 'X-Forwarded-For': '192.168.1.99' }
+for (let i = 0; i < 6; i++) await req('GET', '/api/tickets/0000', { headers: GUESSER })
+r = await req('GET', '/api/tickets/0001', { headers: GUESSER })
+check('6 wrong codes → locked out (429)', r.status === 429 && r.data.code === 'TOO_MANY_ATTEMPTS', r.status)
+r = await req('POST', '/api/tickets/claim', { body: { code: '0002' }, headers: GUESSER })
+check('Lockout also covers the iPad claim route', r.status === 429, r.status)
+r = await req('GET', '/api/tickets/0000')
+check('Staff (ticket desk) is never locked out', r.status === 404, r.status)
+
+// ── Unpaid tickets cannot start a shoot ─────────────────────────────────────
+r = await req('POST', '/api/tickets/issue', { body: { planType: 99, paymentMethod: 'CASH' } })
+const unpaid = r.data.ticket
+r = await req('POST', `/api/tickets/${unpaid.id}/status`, { body: { status: 'IN_BOOTH' }, headers: LAN })
+check('Unpaid ticket cannot enter the booth (402)', r.status === 402 && r.data.code === 'UNPAID', r.status)
+
 // ── CORS ────────────────────────────────────────────────────────────────────
 r = await req('POST', '/api/tickets/reset', { headers: { Origin: 'https://evil.example.com' } })
 check('Internet origin blocked (drive-by CSRF fix)', r.status === 403, r.status)

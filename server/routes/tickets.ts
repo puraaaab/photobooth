@@ -2,12 +2,46 @@ import { Router, Request, Response } from 'express'
 import { getTicketManager, getVaultManager, getDataPath, io } from '../index'
 import type { TicketStatus } from '../ticketManager'
 import { spawn } from 'child_process'
-import { requireStaff, isStaff, cleanTicketCode } from '../security'
+import { requireStaff, isStaff, cleanTicketCode, clientIp } from '../security'
 import { isValidPlan, PLAN_PRICES, DEFAULT_PLAN } from '../../src/constants/pricing'
 import * as path from 'path'
 import * as fs from 'fs'
 
 export const ticketRouter = Router()
+
+// ─── Code-guessing lockout ───────────────────────────────────────────────────
+// Ticket codes are 4 digits; with ~20 paid tickets waiting, a random guess hits one 1 in 450 times.
+// Guest stations get MAX_MISSES wrong codes per window, then a cool-down. Staff are never limited.
+const MAX_MISSES = 6
+const MISS_WINDOW_MS = 5 * 60 * 1000
+const LOCKOUT_MS = 3 * 60 * 1000
+const misses = new Map<string, { count: number; first: number; lockedUntil: number }>()
+
+function guessLocked(req: Request): number {
+  if (isStaff(req)) return 0
+  const m = misses.get(clientIp(req))
+  return m && m.lockedUntil > Date.now() ? Math.ceil((m.lockedUntil - Date.now()) / 1000) : 0
+}
+
+function recordMiss(req: Request) {
+  if (isStaff(req)) return
+  const ip = clientIp(req)
+  const now = Date.now()
+  const m = misses.get(ip)
+  const entry = !m || now - m.first > MISS_WINDOW_MS ? { count: 0, first: now, lockedUntil: 0 } : m
+  entry.count++
+  if (entry.count >= MAX_MISSES) {
+    entry.lockedUntil = now + LOCKOUT_MS
+    entry.count = 0
+    entry.first = now
+  }
+  misses.set(ip, entry)
+}
+
+function lockedResponse(res: Response, seconds: number) {
+  res.setHeader('Retry-After', String(seconds))
+  return res.status(429).json({ error: `Too many wrong ticket codes. Please wait ${Math.ceil(seconds / 60)} min or ask staff.`, code: 'TOO_MANY_ATTEMPTS', retryAfter: seconds })
+}
 
 // ─── GET /api/tickets ────────────────────────────────────────────────────────
 ticketRouter.get('/', (req: Request, res: Response) => {
@@ -53,11 +87,15 @@ ticketRouter.get('/:code', (req: Request, res: Response) => {
     return res.status(503).json({ error: 'Ticket manager not ready' })
   }
 
+  const locked = guessLocked(req)
+  if (locked) return lockedResponse(res, locked)
+
   const rawCode = req.params.code as string
   const cleanCode = rawCode.replace(/^#/, '').trim()
   const ticket = manager.getTicketByCode(cleanCode) || manager.getTicketById(cleanCode)
 
   if (!ticket) {
+    recordMiss(req)
     return res.status(404).json({ error: `Ticket #${cleanCode} not found` })
   }
 
@@ -269,8 +307,12 @@ ticketRouter.post('/claim', (req: Request, res: Response) => {
     return res.status(400).json({ success: false, error: 'Ticket code must be exactly 4 numeric digits.' })
   }
 
+  const locked = guessLocked(req)
+  if (locked) return lockedResponse(res, locked)
+
   const existingTicket = manager.getTicketByCode(cleanCode)
   if (!existingTicket) {
+    recordMiss(req)
     return res.status(404).json({ success: false, error: `Ticket #${cleanCode} not found. Please verify with cashier.` })
   }
 
@@ -356,6 +398,10 @@ ticketRouter.post('/:id/status', (req: Request, res: Response) => {
   const current = manager.getTicketById(id) || manager.getTicketByCode(id)
   if (!current) {
     return res.status(404).json({ error: `Ticket not found: ${id}` })
+  }
+  // A guest station may only start a shoot on a paid ticket (whatever the payment method)
+  if (!isStaff(req) && status === 'IN_BOOTH' && current.paymentStatus !== 'PAID') {
+    return res.status(402).json({ error: `Ticket #${current.code} is not paid yet. Please pay at the counter.`, code: 'UNPAID' })
   }
   // Guest-facing stations (booth Pi, editing iPad) may only move tickets forward.
   // Staff (ticket desk) can force any status, e.g. to re-open or void a ticket.

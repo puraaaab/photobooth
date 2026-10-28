@@ -109,7 +109,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     intervalBetweenShotsSeconds: 2,
     photoCountPerSession: 30,
     queueModeEnabled: true,
-    allowWalkIn: true,
+    // Walk-ins buy a pass at the ticket desk; a guest-side "free walk-in pass" was a free session
+    allowWalkIn: false,
   },
   retention: {
     keepSessionsDays: 7,

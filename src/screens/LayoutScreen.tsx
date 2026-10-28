@@ -7,6 +7,8 @@ import { useToast } from '@/components/ui/Toast'
 import { getDefaultTemplateForPhotoCount } from '@/data/templates'
 import { ArrowLeft, Plus, X, Images, AlertTriangle } from 'lucide-react'
 import type { RankedLayout } from '@/types'
+import { useQueueStore } from '@/store/queueStore'
+import { stripLimitForPlan, EXTRA_SHEET_PRICE, STRIPS_PER_SHEET } from '@/constants/pricing'
 
 interface LayoutScreenProps {
   onBack: () => void
@@ -20,6 +22,12 @@ export function LayoutScreen({ onBack, onNext }: LayoutScreenProps) {
 
   const selectedCount  = session?.selectedPhotoIds.length ?? 0
   const currentLayout  = session?.layout ?? { photosPerStrip: 4, stripCount: 1, arrangement: [], orientation: 'vertical' }
+  // Price of adding one more strip, shown on the button itself (not first revealed at the printer).
+  // One A5 sheet = 2 strips: a strip that fills an already-paid-for half sheet is free.
+  const ticketForPlan = useQueueStore(st => (session?.ticketId ? st.tickets.find(t => t.id === session.ticketId) : undefined) || st.activeTicket)
+  const includedStrips = stripLimitForPlan(ticketForPlan?.planType ?? ticketForPlan?.paymentAmount)
+  const costForStrips = (n: number) => Math.max(0, Math.ceil((n - includedStrips) / STRIPS_PER_SHEET)) * EXTRA_SHEET_PRICE
+  const extraStripPrice = (currentStrips: number) => costForStrips(currentStrips + 1) - costForStrips(currentStrips)
 
   // Smart initial photos-per-strip: match selected count when 2, 3, or multiple of 3
   const initialPhotosPerStrip = useMemo(() => {
@@ -432,6 +440,7 @@ export function LayoutScreen({ onBack, onNext }: LayoutScreenProps) {
                 photos={selectedPhotos}
                 unselectedRollPhotos={unselectedRollPhotos}
                 onAddExtraStrip={handleAddExtraStrip}
+                extraStripPrice={extraStripPrice}
                 onFitIntoPartialStrip={handleFitIntoPartialStrip}
                 onAddRollPhoto={handleAddRollPhoto}
                 onChoosePhotoForSlot={handleChoosePhotoForSlot}
@@ -781,6 +790,7 @@ function ArrangementVisualizer({
   photos,
   unselectedRollPhotos = [],
   onAddExtraStrip,
+  extraStripPrice,
   onFitIntoPartialStrip,
   onAddRollPhoto,
   onChoosePhotoForSlot,
@@ -792,6 +802,8 @@ function ArrangementVisualizer({
   photos: Array<{ id: string; thumbnailUrl: string; previewUrl?: string; originalUrl?: string }>
   unselectedRollPhotos?: Array<{ id: string; thumbnailUrl: string; previewUrl?: string; originalUrl?: string }>
   onAddExtraStrip: () => void
+  /** Price of one more strip given the current count (0 = covered by the plan) */
+  extraStripPrice?: (currentStrips: number) => number
   onFitIntoPartialStrip: (stripIdx: number) => void
   onAddRollPhoto?: (photoId: string, stripIdx?: number) => void
   onChoosePhotoForSlot?: (stripIdx: number) => void
@@ -1103,6 +1115,7 @@ function ArrangementVisualizer({
               }}
             >
               + PRINT EXTRA STRIP ({unassignedPhotos.length} SHOT{unassignedPhotos.length > 1 ? 'S' : ''})
+              {extraStripPrice && (extraStripPrice(arrangement.length) > 0 ? ` · +₹${extraStripPrice(arrangement.length)}` : ' · INCLUDED')}
             </button>
 
             {firstPartialIdx !== -1 && onChoosePhotoForSlot && (

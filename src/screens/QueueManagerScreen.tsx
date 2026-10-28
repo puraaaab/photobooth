@@ -304,7 +304,9 @@ export function QueueManagerScreen({ onSwitchToKiosk }: QueueManagerScreenProps)
     }
 
     // Step for CASH: Create the ticket FIRST!
-    const createdTicket = await issueTicket({
+    let createdTicket: Ticket
+    try {
+      createdTicket = await issueTicket({
       customerName: customerName.trim() || undefined,
       customerPhone: customerPhone.trim() || undefined,
       notes: notes.trim() || undefined,
@@ -313,7 +315,11 @@ export function QueueManagerScreen({ onSwitchToKiosk }: QueueManagerScreenProps)
       paymentAmount: selectedPlan,
       paymentStatus: 'PENDING',
       planType: selectedPlan,
-    })
+      })
+    } catch (err: any) {
+      alert(`Ticket not issued: ${err?.message || 'server refused'}`)
+      return
+    }
 
     // Reset inputs
     setCustomerName('')
@@ -357,6 +363,9 @@ export function QueueManagerScreen({ onSwitchToKiosk }: QueueManagerScreenProps)
 
       // Open ticket pass modal
       setIssuedTicketModal(ticket)
+    } catch (err: any) {
+      // The payment itself is safe: the server auto-issues a pass for a paid-but-unissued UPI payment
+      alert(`Pass not issued: ${err?.message || 'server refused'}. The UPI payment is recorded; if you cannot issue it, the server issues a pass automatically within ~2 minutes.`)
     } finally {
       setIsConfirmingPayment(false)
     }
@@ -2189,6 +2198,8 @@ export function QueueManagerScreen({ onSwitchToKiosk }: QueueManagerScreenProps)
                           setPendingTicketData(null)
                           setShowUpiModal(false)
                           setIssuedTicketModal(ticket)
+                        } catch (err: any) {
+                          alert(`Paid, but the pass was not issued: ${err?.message || 'server refused'}. The server issues a pass automatically within ~2 minutes.`)
                         } finally {
                           setIsConfirmingPayment(false)
                         }

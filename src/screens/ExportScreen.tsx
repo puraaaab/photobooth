@@ -1570,6 +1570,27 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
   // ─── Direct Silent Print via Spooler with Roll Tracking ───────────────────
   const printedOnceRef = useRef(false)
 
+  // ─── Operator-only controls ────────────────────────────────────────────────
+  // Paper layout, the auto-duplicate toggle and SAVE (full-resolution print files) change how much
+  // paper comes out / let print files leave the booth, so on the guest iPad they need the staff PIN.
+  // One correct PIN unlocks them for this guest's session.
+  const staffUnlockedRef = useRef(false)
+  const withStaff = useCallback(async (action: () => void) => {
+    if (staffUnlockedRef.current) return action()
+    const pin = window.prompt('Staff only. Attendant: enter staff PIN')
+    if (!pin) return
+    const ok = await fetch(`http://${window.location.hostname || 'localhost'}:3847/api/staff/verify`, {
+      method: 'POST',
+      headers: { 'X-Staff-Pin': pin },
+    }).then(r => r.ok).catch(() => false)
+    if (!ok) {
+      toast('Wrong staff PIN.', 'error')
+      return
+    }
+    staffUnlockedRef.current = true
+    action()
+  }, [toast])
+
   // ─── Network printer (laptop server → Wi-Fi printer over IPP) ─────────────
   // When available, sheets go straight to the printer with copies fixed by the server, so the
   // guest never sees the iOS print dialog. Otherwise we fall back to AirPrint.
@@ -1592,6 +1613,32 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
     const t = setInterval(poll, 15000)
     return () => { alive = false; clearInterval(t) }
   }, [])
+
+  /** AirPrint mode: ask the server to authorize + record this print (quota per ticket). */
+  const authorizeAirPrint = useCallback(async (stripCount: number, sheetCount: number): Promise<boolean> => {
+    const body = JSON.stringify({ ticketId: session?.ticketId, sessionId: session?.id, stripCount, sheetCount })
+    const post = (pin?: string) => fetch(`http://${window.location.hostname || 'localhost'}:3847/api/print/authorize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(pin ? { 'X-Staff-Pin': pin } : {}) },
+      body,
+    })
+    try {
+      let res = await post()
+      let data = await res.json().catch(() => ({}))
+      if (res.status === 403) {
+        const pin = window.prompt(`${data.error || 'This print needs staff approval.'}\n\nAttendant: enter staff PIN to approve`)
+        if (!pin) return false
+        res = await post(pin)
+        data = await res.json().catch(() => ({}))
+      }
+      if (res.ok) return true
+      toast(data.error || 'Print not authorized', 'error')
+      return false
+    } catch {
+      toast('Cannot reach the laptop to authorize this print.', 'error')
+      return false
+    }
+  }, [session?.ticketId, session?.id, toast])
 
   const sendToNetworkPrinter = useCallback(async (sheetUrls: string[], stripCount: number): Promise<'ok' | 'denied' | 'failed'> => {
     // PNG sheets at 300 dpi are several MB each; JPEG keeps the upload fast over Wi-Fi
@@ -1638,20 +1685,8 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
   const handlePrint = useCallback(async (opts?: { overridePlan?: TicketPlan; maxStrips?: number; allowSelected?: boolean }) => {
     if (!session || strips.length === 0) return
 
-    // A ticket buys one print run. Reprints (paper jam, smudge…) need an attendant.
-    // (With a network printer the server enforces this itself, per ticket.)
-    if (printedOnceRef.current && !networkPrinterRef.current?.reachable) {
-      const pin = window.prompt('Reprint needs staff approval. Attendant: enter staff PIN')
-      if (!pin) return
-      const ok = await fetch(`http://${window.location.hostname || 'localhost'}:3847/api/staff/verify`, {
-        method: 'POST',
-        headers: { 'X-Staff-Pin': pin },
-      }).then(r => r.ok).catch(() => false)
-      if (!ok) {
-        toast('Reprint not approved.', 'error')
-        return
-      }
-    }
+    // Reprints, unpaid tickets and prints beyond the plan are decided by the server per ticket
+    // (it remembers prints across screens and devices), in both network and AirPrint mode.
     setPrinting(true)
 
     try {
@@ -1793,6 +1828,12 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
 
       // 3. Native silent printing via Electron & Spooler
       if (window.electronAPI?.print?.printSilent) {
+        // Same per-ticket quota as every other print path
+        const physicalStrips = activeLayout === 'a5-2' ? printSheetUrls.length * 2 : singleStripCanvases.length * copies
+        if (!(await authorizeAirPrint(physicalStrips, printSheetUrls.length))) {
+          setPrinting(false)
+          return
+        }
         for (const sheetUrl of printSheetUrls) {
           await window.electronAPI.print.printSilent({
             sessionId: session.id,
@@ -1829,7 +1870,16 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
         return
       }
 
-      // 5. Browser fallback (no network printer configured): AirPrint via hidden iframe
+      // 5. Browser fallback (no network printer configured): AirPrint via hidden iframe.
+      //    The server must authorize (and record) the print first — fail closed if it can't be reached.
+      {
+        const physicalStrips = activeLayout === 'a5-2' ? printSheetUrls.length * 2 : singleStripCanvases.length * copies
+        const authorized = await authorizeAirPrint(physicalStrips, printSheetUrls.length)
+        if (!authorized) {
+          setPrinting(false)
+          return
+        }
+      }
       const printIframe = document.createElement('iframe')
       printIframe.style.position = 'fixed'
       printIframe.style.top = '-9999px'
@@ -1957,7 +2007,7 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
   }, [
     session, strips, copies, paperLayout, paperSaving, settings, physicalSheets,
     renderStripCanvas, renderA5DuplexCanvas, render4x6DuplexCanvas, renderDyeSub4x5Canvas, renderDyeSub4x6Canvas, renderA4SheetCanvas,
-    effectivePlan, planOffers.length, decrementRollCount, recordPrintJob, toast, sendToNetworkPrinter, ensureSharedExport,
+    effectivePlan, planOffers.length, decrementRollCount, recordPrintJob, toast, sendToNetworkPrinter, ensureSharedExport, authorizeAirPrint,
     // copies/plan guard inputs (offerCopiesUnlock / extraSheetsFor read these)
     upgradedPlan, selectedStripIndices, planStripLimit,
   ])
@@ -3173,7 +3223,7 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
             {/* ── PRIMARY: A5 Duplex (2 Strips / Half-A4 · Zero Waste) ── */}
             <button
               type="button"
-              onClick={() => { setPaperLayout('a5-2'); setCurrentSheetIndex(0) }}
+              onClick={() => withStaff(() => { setPaperLayout('a5-2'); setCurrentSheetIndex(0) })}
               style={{
                 padding: '13px 12px',
                 display: 'flex',
@@ -3222,7 +3272,7 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
             {/* ── SECONDARY: A4 5-up (Epson L3150 Full Sheet) ── */}
             <button
               type="button"
-              onClick={() => { setPaperLayout('a4-5'); setCurrentSheetIndex(0) }}
+              onClick={() => withStaff(() => { setPaperLayout('a4-5'); setCurrentSheetIndex(0) })}
               style={{
                 padding: '11px 12px',
                 display: 'flex',
@@ -3259,7 +3309,7 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
             {/* ── SECONDARY: Standard 4"×6" Duplex ─────────────────────────── */}
             <button
               type="button"
-              onClick={() => { setPaperLayout('4x6-duplex'); setCurrentSheetIndex(0) }}
+              onClick={() => withStaff(() => { setPaperLayout('4x6-duplex'); setCurrentSheetIndex(0) })}
               style={{
                 padding: '11px 12px',
                 display: 'flex',
@@ -3318,7 +3368,7 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
               </div>
               <button
                 type="button"
-                onClick={() => setPaperSaving(prev => !prev)}
+                onClick={() => withStaff(() => setPaperSaving(prev => !prev))}
                 style={{
                   padding: '4px 10px',
                   borderRadius: 'var(--radius-full)',
@@ -3339,7 +3389,7 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
             {/* ── TERTIARY: 4×5" Dye-Sub ──────────────────────────────────── */}
             <button
               type="button"
-              onClick={() => { setPaperLayout('4x5-split'); setCurrentSheetIndex(0) }}
+              onClick={() => withStaff(() => { setPaperLayout('4x5-split'); setCurrentSheetIndex(0) })}
               style={{
                 padding: '10px 12px',
                 display: 'flex',
@@ -3372,7 +3422,7 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
                 <button
                   key={key}
                   type="button"
-                  onClick={() => { setPaperLayout(key); setCurrentSheetIndex(0) }}
+                  onClick={() => withStaff(() => { setPaperLayout(key); setCurrentSheetIndex(0) })}
                   style={{
                     padding: '8px 4px',
                     display: 'flex',
@@ -3671,7 +3721,7 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
             <button
               id="export-save-btn"
               className="btn btn-secondary"
-              onClick={exportStrips}
+              onClick={() => withStaff(() => { exportStrips() })}
               disabled={exporting || printing}
               style={{
                 minHeight: 44,

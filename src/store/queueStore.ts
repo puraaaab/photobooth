@@ -160,6 +160,7 @@ export const useQueueStore = create<QueueState>()((set, get) => {
     // ─── Issue Ticket ───────────────────────────────────────────────────────
     issueTicket: async (input) => {
       set({ isLoading: true, error: null })
+      let refused: string | null = null
       try {
         const res = await fetch(`${SERVER_BASE}/api/tickets/issue`, {
           method: 'POST',
@@ -182,8 +183,16 @@ export const useQueueStore = create<QueueState>()((set, get) => {
           })
           return ticket
         }
+        // The server answered and said no (e.g. guest iPad without staff PIN): never invent a
+        // local "offline" ticket — that would let an unpaid guest through.
+        const d = await res.json().catch(() => ({}))
+        refused = d.error || `Ticket could not be issued (${res.status})`
       } catch (err) {
         console.warn('[QueueStore] Offline issue ticket fallback:', err)
+      }
+      if (refused) {
+        set({ isLoading: false, error: refused })
+        throw new Error(refused)
       }
 
       // Offline fallback generation

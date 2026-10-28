@@ -5,7 +5,7 @@ import fs from 'fs'
 import path from 'path'
 import { getTicketManager, getDataPath, io } from '../index'
 import { isSafeId } from '../security'
-import { PLAN_PRICES as PLAN_PRICE_LIST, allowedChargeAmounts } from '../../src/constants/pricing'
+import { PLAN_PRICES as PLAN_PRICE_LIST, allowedChargeAmounts, planFromPayment } from '../../src/constants/pricing'
 
 // Helper to guarantee .env variables are loaded (does not override real environment variables)
 function loadEnv() {
@@ -64,6 +64,9 @@ function applyPaymentToTicket(ticketId: string, paymentId: string, paidRupees: n
   appliedPaymentIds.add(paymentId)
   const isUpgrade = purpose === 'upgrade' && ticket.paymentStatus === 'PAID'
   const newAmount = isUpgrade ? (ticket.paymentAmount ?? 0) + paidRupees : paidRupees
+  // The plan is derived from what was actually paid. The plan sent by the browser is only a hint:
+  // paying ₹79 must never unlock the ₹229 plan.
+  planType = planFromPayment(ticket.planType, paidRupees, isUpgrade) ?? 0
   const updated = manager.updateTicketPayment(ticket.id, {
     paymentStatus: 'PAID',
     paymentMethod: 'UPI',
@@ -92,6 +95,8 @@ interface PendingPayment {
   purpose: 'ticket' | 'upgrade'
   createdAt: number
   status: 'pending' | 'paid' | 'expired'
+  paidAt?: number
+  autoIssued?: boolean
   paymentId?: string
   imageUrl?: string
   payUrl?: string
@@ -119,6 +124,7 @@ function markPaid(p: PendingPayment, paymentId: string) {
   if (p.status === 'paid') return
   p.status = 'paid'
   p.paymentId = paymentId
+  p.paidAt = Date.now()
   applyPaymentToTicket(p.ticketId, paymentId, p.amount, p.planType, p.purpose)
   persistPending()
   console.log(`[Payments] Auto-confirmed ${p.kind} ${p.id}: ₹${p.amount} (${paymentId})`)
@@ -155,6 +161,32 @@ async function checkPending(p: PendingPayment): Promise<void> {
   }
 }
 
+// A guest paid for a NEW pass (desk QR) but no ticket carries that payment 90 s later → the desk
+// screen was closed or crashed. Issue the pass server-side so the money is never "lost"; the desk sees
+// it in the queue (note: auto-issued) and can hand over the code.
+const AUTO_ISSUE_AFTER_MS = 90_000
+function autoIssueIfOrphaned(p: PendingPayment) {
+  if (p.status !== 'paid' || p.purpose !== 'ticket' || p.ticketId || p.autoIssued || !p.paymentId || !p.paidAt) return
+  if (Date.now() - p.paidAt < AUTO_ISSUE_AFTER_MS) return
+  const manager = getTicketManager()
+  if (!manager) return
+  p.autoIssued = true
+  if (manager.listTickets().some(t => t.upiTransactionRef === p.paymentId)) { persistPending(); return }
+  const plan = VALID_PLANS.has(p.amount) ? p.amount : undefined
+  const ticket = manager.issueTicket({
+    paymentMethod: 'UPI',
+    paymentAmount: p.amount,
+    paymentStatus: 'PAID',
+    upiTransactionRef: p.paymentId,
+    planType: plan,
+    notes: 'Auto-issued: UPI paid at the desk but the pass was not issued',
+  })
+  persistPending()
+  console.warn(`[Payments] Auto-issued ticket #${ticket.code} for orphaned payment ${p.paymentId} (₹${p.amount})`)
+  io?.emit('ticket:issued', ticket)
+  io?.emit('queue:updated', { tickets: manager.listTickets(), nextCode: manager.getNextCode(), financialSummary: manager.getFinancialSummary() })
+}
+
 let reconcilerTimer: NodeJS.Timeout | null = null
 /** Polls Razorpay for every pending order / QR — confirmation does not depend on the screen staying open. */
 export function startPaymentReconciler(): void {
@@ -167,8 +199,12 @@ export function startPaymentReconciler(): void {
     try {
       for (const p of pending.values()) {
         await checkPending(p).catch(err => console.warn('[Payments] Reconcile check failed:', err?.error?.description || err?.message))
+        autoIssueIfOrphaned(p)
       }
-      for (const [id, p] of pending) if (p.status !== 'pending' && Date.now() - p.createdAt > PENDING_TTL_MS) pending.delete(id)
+      for (const [id, p] of pending) {
+        const done = p.status === 'expired' || (p.status === 'paid' && (p.purpose !== 'ticket' || p.ticketId || p.autoIssued))
+        if (done && Date.now() - p.createdAt > PENDING_TTL_MS) pending.delete(id)
+      }
     } finally {
       busy = false
     }

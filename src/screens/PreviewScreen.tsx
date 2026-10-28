@@ -6,6 +6,8 @@ import { getPhotoUrl } from '@/utils/photoUrl'
 import { filterEngine } from '@/engines/FilterEngine'
 import { boothCopy } from '@/constants/boothCopy'
 import { PrintCopiesModal } from '@/components/modals/PrintCopiesModal'
+import { useQueueStore } from '@/store/queueStore'
+import { stripLimitForPlan } from '@/constants/pricing'
 import type { AppStep } from '@/constants/steps'
 
 interface PreviewScreenProps {
@@ -16,6 +18,9 @@ interface PreviewScreenProps {
 
 export function PreviewScreen({ onBack, onNext, onGoToStep }: PreviewScreenProps) {
   const { session, setPrintSettings } = useSessionStore()
+  // Plan of this guest's ticket → strips already paid for (copies beyond it show their price)
+  const ticketForPlan = useQueueStore(st => (session?.ticketId ? st.tickets.find(t => t.id === session.ticketId) : undefined) || st.activeTicket)
+  const includedStrips = stripLimitForPlan(ticketForPlan?.planType ?? ticketForPlan?.paymentAmount)
   const [viewMode, setViewMode] = useState<'single' | 'all' | 'a4'>('all')
   const [a4LayoutMode, setA4LayoutMode] = useState<'a4-5' | 'a4-6' | 'a4-8' | 'a4-4'>('a4-5')
   const [activeStripIndex, setActiveStripIndex] = useState(0)
@@ -1259,6 +1264,7 @@ export function PreviewScreen({ onBack, onNext, onGoToStep }: PreviewScreenProps
         isOpen={showCopiesModal}
         stripCount={strips.length}
         initialCopies={session?.printSettings?.copies || 1}
+        includedStrips={includedStrips}
         onConfirm={(chosenCopies) => {
           setPrintSettings({ copies: chosenCopies })
           setShowCopiesModal(false)

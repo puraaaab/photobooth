@@ -243,3 +243,34 @@ Gap: if the desk tab is closed after a guest pays a *new-ticket* QR, the payment
 
 Tests: `tests/negative.mjs` (52), `tests/print.mjs` (14, fake printer), `tests/pwg-raster.test.ts`. Start
 test servers with `PRINTER_AUTOSETUP=0` so they never adopt a real printer.
+
+---
+
+## 6. Final gap sweep — "more prints than paid for" (2026-10-28)
+
+Every print, export, ticket and payment path was checked for ways to get output without paying for it.
+
+| # | Gap | Fix |
+|---|---|---|
+| 1 | Preview "copies" popup (up to 10) had no price or plan check; its value carried into printing | Prices shown per option (included / +₹79 / +₹158 / ask staff); export screen re-checks at Print |
+| 2 | Copies over the plan printed free | Paid unlock (same popup as extra strips); copies apply after payment |
+| 3 | **AirPrint mode** relied on a per-screen flag: leaving and re-entering the export screen gave free reprints; no-ticket and unpaid prints passed | Server `/api/print/authorize` with the same per-ticket ledger as network printing; fails closed if the laptop is unreachable |
+| 4 | SAVE JPEG/PDF exported full print sheets to the guest iPad (reprint from Photos/Files) | Staff PIN |
+| 5 | Guests could switch paper layout / auto-duplicate (more physical strips, wrong paper) | Staff PIN |
+| 6 | "+ PRINT EXTRA STRIP" had no price (drip pricing) | Button shows "+₹79" or "INCLUDED" |
+| 7 | 4-digit ticket codes could be guessed endlessly | 6 wrong codes per device → 3-minute lockout (staff exempt) |
+| 8 | Upgrade payments applied the plan the browser *claimed* | Plan derived from the amount actually paid (`planFromPayment`) |
+| 9 | Desk QR paid but desk tab closed → money received, no pass | Server auto-issues the pass after 90 s (marked "Auto-issued") |
+| 10 | Guest "free walk-in pass" (on by default) = free session; server refusal fell back to a fake local ticket | Off by default; a server refusal is never turned into a local ticket; desk shows errors |
+| 11 | Booth blocked only unpaid *cash* tickets; server let any unpaid ticket enter the booth | Any unpaid ticket refused, on the booth and the server |
+| 12 | Dormant Electron silent-print path skipped all checks | Uses the same server authorization |
+
+Tests: `tests/negative.mjs` (56), `tests/print.mjs` (21, incl. AirPrint authorize), `tests/pwg-raster.test.ts`,
+`tests/plan-from-payment.test.ts`.
+
+**Still open, by design or needing hardware:**
+- AirPrint mode: the iOS dialog's copy field can't be controlled from a web page. The server still counts every
+  authorized print, so reprints and over-plan prints are blocked, but one dialog could print extra copies.
+  **Network printing (printer found on the Wi-Fi) closes this completely.** Keep the printer on the same network.
+- Existing iPads keep their saved walk-in setting (button may still show; it now just says to buy at the desk).
+- The photo upload route still accepts the `X-Booth-Internal` header instead of the per-session token.
