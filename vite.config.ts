@@ -24,18 +24,18 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     cors: true,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    },
     proxy: {
+      // xfwd: the server only trusts X-Forwarded-For from loopback, so staff-only routes still see the
+      // real station IP in development instead of treating every proxied request as the ticket laptop
       '/sessions': {
         target: 'http://127.0.0.1:3847',
         changeOrigin: true,
+        xfwd: true,
       },
       '/api': {
         target: 'http://127.0.0.1:3847',
         changeOrigin: true,
+        xfwd: true,
       },
       '/website': {
         target: 'http://127.0.0.1:3847',

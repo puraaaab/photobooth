@@ -5,7 +5,7 @@
 # ==============================================================================
 set -e
 
-HOST_IP="192.168.29.33:5173"
+HOST_IP="${1:-192.168.29.33}:${2:-3847}"   # laptop running `npm start` (5173 only in development)
 USER_NAME="${USER:-prbtlr}"
 INSTALL_DIR="/home/$USER_NAME"
 TARGET_SCRIPT="$INSTALL_DIR/pi-camera.py"
@@ -18,9 +18,12 @@ echo "  • Directory: $INSTALL_DIR"
 echo "  • PC Server: $HOST_IP"
 echo "============================================================"
 
+# 0. Camera stack: picamera2 gives real stills + hardware MJPEG preview
+sudo apt-get install -y python3-picamera2 v4l-utils >/dev/null || echo "WARN: python3-picamera2 unavailable; legacy rpicam-vid mode will be used"
+
 # 1. Fetch latest pi-camera.py
 echo "📥 Downloading camera script from PC..."
-curl -sSL "http://$HOST_IP/pi-camera.py" -o "$TARGET_SCRIPT"
+curl -fsSL "http://$HOST_IP/pi-camera.py" -o "$TARGET_SCRIPT"
 chmod +x "$TARGET_SCRIPT"
 
 # 2. Register systemd unit file

@@ -35,17 +35,24 @@ import { useQueueStore } from '@/store/queueStore'
 import { useConnectionStore } from '@/store/connectionStore'
 import type { Ticket, TicketStatus, TicketPlan } from '@/types'
 import { openRazorpayCheckout } from '@/utils/razorpay'
+import { PLANS, DEFAULT_PLAN, getPlan } from '@/constants/pricing'
+import { PrinterPanel } from '@/components/kiosk/PrinterPanel'
+import { AutoUpiQr } from '@/components/ui/AutoUpiQr'
 
 export const TICKET_PRICE = 99
 export const UPI_ID = '9313780044@superyes'
 export const UPI_PAYEE_NAME = 'Photobooth Studio'
 
 // Ticket Plans
-export const TICKET_PLANS: { plan: TicketPlan; strips: number; label: string; paperLabel: string; desc: string; badge?: string }[] = [
-  { plan: 99,  strips: 2, label: '₹99',  paperLabel: 'A5 Paper',    desc: '2 Photo Strips · A5 Paper',     badge: 'POPULAR' },
-  { plan: 149, strips: 3, label: '₹149', paperLabel: 'A4 · 5-up',   desc: '3 Photo Strips · A4 5-up Sheet' },
-  { plan: 179, strips: 5, label: '₹179', paperLabel: 'A4 · 5-up',   desc: '5 Photo Strips · A4 5-up Sheet', badge: 'BEST VALUE' },
-]
+export const TICKET_PLANS: { plan: TicketPlan; strips: number; label: string; paperLabel: string; desc: string; badge?: string }[] =
+  PLANS.map(p => ({
+    plan: p.price as TicketPlan,
+    strips: p.strips,
+    label: p.label,
+    paperLabel: `${p.sheets} × A5`,
+    desc: p.desc,
+    badge: p.badge,
+  }))
 
 export function getUpiPaymentUrl(code: string, amount: number = 99): string {
   const cleanCode = code.replace(/^#/, '').trim()
@@ -127,7 +134,7 @@ export function QueueManagerScreen({ onSwitchToKiosk }: QueueManagerScreenProps)
   const [notes, setNotes] = useState('')
   const [customCode, setCustomCode] = useState('')
   const [useCustomCode, setUseCustomCode] = useState(false)
-  const [selectedPlan, setSelectedPlan] = useState<TicketPlan>(99)
+  const [selectedPlan, setSelectedPlan] = useState<TicketPlan>(DEFAULT_PLAN as TicketPlan)
 
   // Payment flow state
   const [paymentMethod, setPaymentMethod] = useState<'UPI' | 'CASH'>('UPI')
@@ -320,7 +327,8 @@ export function QueueManagerScreen({ onSwitchToKiosk }: QueueManagerScreenProps)
   }
 
   // Confirm UPI payment and issue ticket
-  const handleConfirmUpiPayment = async () => {
+  // paymentRef is passed when Razorpay auto-confirmed the dynamic QR; manual confirmations use the typed ref
+  const handleConfirmUpiPayment = async (paymentRef?: string) => {
     if (!pendingTicketData) return
     setIsConfirmingPayment(true)
     try {
@@ -333,7 +341,7 @@ export function QueueManagerScreen({ onSwitchToKiosk }: QueueManagerScreenProps)
         paymentAmount: pendingTicketData.planType,
         paymentStatus: 'PAID',
         paidAt: new Date().toISOString(),
-        upiTransactionRef: upiTxnRef.trim() || undefined,
+        upiTransactionRef: paymentRef || upiTxnRef.trim() || undefined,
         planType: pendingTicketData.planType,
       })
 
@@ -463,6 +471,8 @@ export function QueueManagerScreen({ onSwitchToKiosk }: QueueManagerScreenProps)
   }
 
   return (
+    <>
+    <PrinterPanel />
     <div
       className="qm-root"
       style={{
@@ -1146,7 +1156,7 @@ export function QueueManagerScreen({ onSwitchToKiosk }: QueueManagerScreenProps)
                       {badge && (
                         <span style={{
                           position: 'absolute', top: -9, right: 8,
-                          background: plan === 99 ? '#0284c7' : '#16a34a',
+                          background: plan === DEFAULT_PLAN ? '#0284c7' : '#16a34a',
                           color: '#fff', fontSize: 9, fontWeight: 800,
                           padding: '2px 8px', borderRadius: 'var(--radius-full)',
                           letterSpacing: '0.05em',
@@ -1170,7 +1180,7 @@ export function QueueManagerScreen({ onSwitchToKiosk }: QueueManagerScreenProps)
                             {desc}
                           </span>
                           <span style={{ fontSize: 9.5, fontFamily: 'var(--font-mono)', color: 'var(--color-text-tertiary)' }}>
-                            {strips === 2 ? 'A5 Half-Sheet \xb7 1 centre cut' : `Up to ${strips} strips on A4 landscape`}
+                            {`${strips / 2} A5 sheet${strips > 2 ? 's' : ''} \xb7 2 strips per sheet \xb7 1 centre cut each`}
                           </span>
                         </div>
                       </div>
@@ -2152,7 +2162,7 @@ export function QueueManagerScreen({ onSwitchToKiosk }: QueueManagerScreenProps)
                     if (!pendingTicketData) return
                     openRazorpayCheckout({
                       amount: pendingTicketData.planType,
-                      description: `Photobooth Pass #${pendingTicketData.code} (${pendingTicketData.planType === 99 ? '2 Strips' : pendingTicketData.planType === 149 ? '3 Strips' : '5 Strips'})`,
+                      description: `Photobooth Pass #${pendingTicketData.code} (${getPlan(pendingTicketData.planType)?.strips ?? 2} Strips)`,
                       customerName: pendingTicketData.customerName,
                       customerPhone: pendingTicketData.customerPhone,
                       onSuccess: async (res) => {
@@ -2229,11 +2239,20 @@ export function QueueManagerScreen({ onSwitchToKiosk }: QueueManagerScreenProps)
                   boxShadow: '0 12px 32px rgba(109, 6, 38, 0.15)',
                 }}
               >
-                <QRCodeSVG
-                  value={getUpiPaymentUrl(pendingTicketData.code, pendingTicketData.planType)}
+                <AutoUpiQr
+                  amount={pendingTicketData.planType}
+                  planType={pendingTicketData.planType}
                   size={190}
-                  level="H"
-                  includeMargin={true}
+                  onPaid={(paymentId) => handleConfirmUpiPayment(paymentId)}
+                  fallback={
+                    // Dynamic QR unavailable (keys missing / QR Codes not enabled): static UPI QR + manual confirm below
+                    <QRCodeSVG
+                      value={getUpiPaymentUrl(pendingTicketData.code, pendingTicketData.planType)}
+                      size={190}
+                      level="H"
+                      includeMargin={true}
+                    />
+                  }
                 />
               </div>
 
@@ -2329,7 +2348,7 @@ export function QueueManagerScreen({ onSwitchToKiosk }: QueueManagerScreenProps)
                 <button
                   type="button"
                   disabled={isConfirmingPayment}
-                  onClick={handleConfirmUpiPayment}
+                  onClick={() => handleConfirmUpiPayment()}
                   className="btn btn-primary flex-1"
                   style={{
                     borderRadius: 'var(--radius-full)',
@@ -3002,5 +3021,6 @@ export function QueueManagerScreen({ onSwitchToKiosk }: QueueManagerScreenProps)
         )}
       </AnimatePresence>
     </div>
+    </>
   )
 }

@@ -12,7 +12,12 @@
     "typecheck": "tsc --noEmit",
     "camera:server": "node pi-setup/camera-server.js",
     "build:templates": "node scripts/rebuildAllCleanTemplatesFromRemovedBg.cjs",
-    "extract-stickers": "node scripts/autoExtractStickerSheet.cjs"
+    "extract-stickers": "node scripts/autoExtractStickerSheet.cjs",
+    "start": "npx tsx server/index.ts",
+    "build:start": "vite build && npx tsx server/index.ts",
+    "test:negative": "node tests/negative.mjs",
+    "test:print": "node tests/print.mjs",
+    "test:pwg": "npx tsx tests/pwg-raster.test.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

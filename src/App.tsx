@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, lazy, Suspense } from 'react'
 import { io, Socket } from 'socket.io-client'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Camera } from 'lucide-react'
@@ -6,20 +6,9 @@ import { useSessionStore } from '@/store/sessionStore'
 import { useConnectionStore } from '@/store/connectionStore'
 import { AppHeader } from '@/components/layout/AppHeader'
 import { AppFooter } from '@/components/layout/AppFooter'
-import { WaitingScreen } from '@/screens/WaitingScreen'
-import { CaptureScreen } from '@/screens/CaptureScreen'
-import { PhotoSelectionScreen } from '@/screens/PhotoSelectionScreen'
-import { LayoutScreen } from '@/screens/LayoutScreen'
-import { TemplateScreen } from '@/screens/TemplateScreen'
-import { EditorScreen } from '@/screens/EditorScreen'
-import { PreviewScreen } from '@/screens/PreviewScreen'
-import { ExportScreen } from '@/screens/ExportScreen'
 import { SessionRecoveryModal } from '@/components/modals/SessionRecoveryModal'
-import { AdminPanelModal } from '@/components/modals/AdminPanelModal'
 import { IdleTimeoutManager } from '@/components/kiosk/IdleTimeoutManager'
 import { ToastContainer } from '@/components/ui/Toast'
-import { QueueManagerScreen } from '@/screens/QueueManagerScreen'
-import { BoothPiScreen } from '@/screens/BoothPiScreen'
 import { DeviceSelectorScreen, type DeviceMode } from '@/screens/DeviceSelectorScreen'
 import { useQueueStore } from '@/store/queueStore'
 import type { Photo, Ticket } from '@/types'
@@ -32,12 +21,34 @@ import {
   tryTemplateBackInterceptor
 } from '@/store/editorBridge'
 
+// Each station only downloads the code it needs: the Pi booth (2 GB RAM) no longer parses the
+// whole editor + template library just to show a keypad and the camera.
+const WaitingScreen = lazy(() => import('@/screens/WaitingScreen').then(m => ({ default: m.WaitingScreen })))
+const CaptureScreen = lazy(() => import('@/screens/CaptureScreen').then(m => ({ default: m.CaptureScreen })))
+const PhotoSelectionScreen = lazy(() => import('@/screens/PhotoSelectionScreen').then(m => ({ default: m.PhotoSelectionScreen })))
+const LayoutScreen = lazy(() => import('@/screens/LayoutScreen').then(m => ({ default: m.LayoutScreen })))
+const TemplateScreen = lazy(() => import('@/screens/TemplateScreen').then(m => ({ default: m.TemplateScreen })))
+const EditorScreen = lazy(() => import('@/screens/EditorScreen').then(m => ({ default: m.EditorScreen })))
+const PreviewScreen = lazy(() => import('@/screens/PreviewScreen').then(m => ({ default: m.PreviewScreen })))
+const ExportScreen = lazy(() => import('@/screens/ExportScreen').then(m => ({ default: m.ExportScreen })))
+const QueueManagerScreen = lazy(() => import('@/screens/QueueManagerScreen').then(m => ({ default: m.QueueManagerScreen })))
+const BoothPiScreen = lazy(() => import('@/screens/BoothPiScreen').then(m => ({ default: m.BoothPiScreen })))
+const AdminPanelModal = lazy(() => import('@/components/modals/AdminPanelModal').then(m => ({ default: m.AdminPanelModal })))
+
+const ScreenFallback = () => (
+  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg)' }}>
+    <div style={{ animation: 'spin 2s linear infinite', color: 'var(--color-brand)' }}><Camera size={36} strokeWidth={1.8} /></div>
+  </div>
+)
+
 const SERVER_BASE = typeof window !== 'undefined' && window.location.hostname
   ? `http://${window.location.hostname}:3847`
   : 'http://localhost:3847'
 
 export default function App() {
   const [step, setStep] = useState<AppStep>('waiting')
+  const stepRef = React.useRef<AppStep>('waiting')
+  stepRef.current = step
   const [retakePhotoId, setRetakePhotoId] = useState<string | null>(null)
   const [socket, setSocket] = useState<Socket | null>(null)
   const [showRecovery, setShowRecovery] = useState(false)
@@ -196,7 +207,8 @@ export default function App() {
     const sock = io(SERVER_BASE, {
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: 5,
+      // Never give up: a Wi-Fi blip longer than ~30s used to leave a station disconnected until reload
+      reconnectionAttempts: Infinity,
       reconnectionDelay: 3000,
       reconnectionDelayMax: 10000,
       timeout: 5000,
@@ -270,15 +282,21 @@ export default function App() {
     })
 
     // ─── Session created by Pi ───────────────────────────────────────────
+    // session:created is broadcast to EVERY station. Only adopt it when this station is idle;
+    // otherwise the editing iPad threw away the current guest's work whenever the booth started
+    // a session for the next guest.
     sock.on('session:created', async (data: { sessionId: string; piName: string }) => {
+      const current = useSessionStore.getState().session
+      const isIdle = stepRef.current === 'waiting' && (!current || (current.photos?.length ?? 0) === 0)
+      if (!isIdle) return
       await loadSession(data.sessionId)
       setStep('waiting')
     })
 
     // ─── Session complete ────────────────────────────────────────────────
-    sock.on('session:complete', (_data: { sessionId: string; count: number }) => {
+    sock.on('session:complete', (data: { sessionId: string; count: number }) => {
       const { session: currentSession } = useSessionStore.getState()
-      if (currentSession) {
+      if (currentSession && currentSession.id === data.sessionId && stepRef.current === 'waiting') {
         setStep('select')
       }
     })
@@ -392,7 +410,9 @@ export default function App() {
   if (appMode === 'ticket') {
     return (
       <div className="app" style={{ overflow: 'hidden' }}>
-        <QueueManagerScreen onSwitchToKiosk={() => setAppMode('selector')} />
+        <Suspense fallback={<ScreenFallback />}>
+          <QueueManagerScreen onSwitchToKiosk={() => setAppMode('selector')} />
+        </Suspense>
         <ToastContainer />
       </div>
     )
@@ -403,7 +423,9 @@ export default function App() {
     return (
       <div className="app" style={{ width: '100vw', height: '100vh', overflow: 'hidden', background: 'var(--color-bg, #F7F1EA)',
         display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <BoothPiScreen />
+        <Suspense fallback={<ScreenFallback />}>
+          <BoothPiScreen />
+        </Suspense>
       </div>
     )
   }
@@ -437,6 +459,7 @@ export default function App() {
 
       {/* Main Content */}
       <div className="app-body" style={{ background: 'var(--color-bg, #F7F1EA)' }}>
+        <Suspense fallback={<ScreenFallback />}>
         <AnimatePresence mode="wait">
           <motion.div
             key={step}
@@ -516,6 +539,7 @@ export default function App() {
             )}
           </motion.div>
         </AnimatePresence>
+        </Suspense>
       </div>
 
       {/* Footer */}
@@ -538,10 +562,14 @@ export default function App() {
       />
 
       {/* Admin Panel Modal */}
-      <AdminPanelModal
-        isOpen={showAdmin}
-        onClose={() => setShowAdmin(false)}
-      />
+      {showAdmin && (
+        <Suspense fallback={null}>
+          <AdminPanelModal
+            isOpen={showAdmin}
+            onClose={() => setShowAdmin(false)}
+          />
+        </Suspense>
+      )}
 
       {/* Toast notifications */}
       <ToastContainer />

@@ -2,6 +2,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { PhotoboothDatabase, type TicketRow } from './db'
 import { VaultManager } from './vaultManager'
+import { isValidPlan, DEFAULT_PLAN } from '../src/constants/pricing'
 
 export type TicketStatus =
   | 'WAITING'
@@ -67,7 +68,7 @@ export class TicketManager {
       if (dbTickets.length > 0) {
         this.tickets = dbTickets.map(t => ({
           ...t,
-          vaultPath: this.vault.getTicketDir(t.code),
+          vaultPath: this.safeVaultDir(t.code),
         }))
         console.log(`[TicketManager] Loaded ${this.tickets.length} ticket(s) from SQLite Database`)
       } else if (fs.existsSync(this.filePath)) {
@@ -101,7 +102,7 @@ export class TicketManager {
             paidAt: t.paidAt,
             upiTransactionRef: t.upiTransactionRef,
             planType: t.planType ?? 99,
-            vaultPath: this.vault.getTicketDir(t.code),
+            vaultPath: this.safeVaultDir(t.code),
           }
           this.db.upsertTicket(row)
           this.vault.ensureVault(t.code)
@@ -116,6 +117,15 @@ export class TicketManager {
     } catch (err) {
       console.error('[TicketManager] Failed loading tickets from SQLite/disk:', err)
       this.tickets = []
+    }
+  }
+
+  /** One malformed legacy code must not make the whole queue fail to load. */
+  private safeVaultDir(code: string): string | undefined {
+    try {
+      return this.vault.getTicketDir(code)
+    } catch {
+      return undefined
     }
   }
 
@@ -187,7 +197,7 @@ export class TicketManager {
       code = this.generateUniqueRandomCode()
     }
 
-    const planType = data.planType || (data.paymentAmount === 99 || data.paymentAmount === 149 || data.paymentAmount === 179 ? data.paymentAmount : 99)
+    const planType = data.planType || (isValidPlan(data.paymentAmount) ? Number(data.paymentAmount) : DEFAULT_PLAN)
     const paymentAmount = data.paymentAmount !== undefined ? data.paymentAmount : (planType ?? (data.paymentMethod ? 99 : undefined))
     const paymentStatus = data.paymentStatus || (data.paymentMethod === 'UPI' ? 'PAID' : (data.paymentMethod === 'CASH' ? 'PENDING' : undefined))
     const paidAt = data.paidAt || (paymentStatus === 'PAID' ? new Date().toISOString() : undefined)

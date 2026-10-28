@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express'
 import * as path from 'path'
 import * as fs from 'fs'
 import { getDataPath } from '../index'
+import { isSafeId, requireStaff } from '../security'
 
 export const smsRouter = Router()
 
@@ -111,7 +112,7 @@ export async function processSmsQueue() {
 smsRouter.post('/send', async (req: Request, res: Response) => {
   const { sessionId, toPhone, message, mediaUrl, twilioConfig } = req.body
 
-  if (!sessionId || !toPhone || toPhone.length < 7) {
+  if (!isSafeId(sessionId) || typeof toPhone !== 'string' || !/^\+?\d{10,15}$/.test(toPhone.replace(/[\s-]/g, ''))) {
     return res.status(400).json({ error: 'Valid sessionId and toPhone required' })
   }
 
@@ -149,7 +150,7 @@ smsRouter.post('/send', async (req: Request, res: Response) => {
 })
 
 // GET /api/sms/queue
-smsRouter.get('/queue', (_req: Request, res: Response) => {
+smsRouter.get('/queue', requireStaff, (_req: Request, res: Response) => {
   const queue = loadQueue()
   res.json({ queue: queue.map(({ twilioConfig: _t, ...rest }) => rest) })
 })

@@ -23,7 +23,8 @@ export type TicketStatus =
 export type PaymentMethod = 'UPI' | 'CASH'
 export type PaymentStatus = 'PAID' | 'PENDING'
 
-export type TicketPlan = 99 | 149 | 179
+// Current plans 99 / 169 / 229 (see src/constants/pricing.ts); 149 / 179 kept for tickets sold before the change
+export type TicketPlan = 99 | 169 | 229 | 149 | 179
 
 export interface Ticket {
   id: string              // e.g. "T-1001"
@@ -44,7 +45,7 @@ export interface Ticket {
   paymentStatus?: PaymentStatus
   paidAt?: string
   upiTransactionRef?: string
-  planType?: TicketPlan   // 99 = 2 strips (A5), 149 = 3 strips (A4 5-up), 179 = 5 strips (A4 5-up)
+  planType?: TicketPlan   // 99 = 2 strips, 169 = 4 strips, 229 = 6 strips (all on A5, 2 strips per sheet)
 }
 
 export interface Session {

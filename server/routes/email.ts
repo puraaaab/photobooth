@@ -3,6 +3,7 @@ import * as path from 'path'
 import * as fs from 'fs'
 import nodemailer from 'nodemailer'
 import { getDataPath } from '../index'
+import { isSafeId, requireStaff } from '../security'
 
 export const emailRouter = Router()
 
@@ -113,7 +114,7 @@ export async function processEmailQueue() {
 emailRouter.post('/send', async (req: Request, res: Response) => {
   const { sessionId, toEmail, subject, bodyText, smtpConfig } = req.body
 
-  if (!sessionId || !toEmail || !toEmail.includes('@')) {
+  if (!isSafeId(sessionId) || typeof toEmail !== 'string' || !/^[^\s@<>,;]{1,64}@[^\s@<>,;]{1,190}\.[a-z]{2,}$/i.test(toEmail.trim())) {
     return res.status(400).json({ error: 'Valid sessionId and toEmail required' })
   }
 
@@ -170,7 +171,7 @@ emailRouter.post('/send', async (req: Request, res: Response) => {
 })
 
 // GET /api/email/queue
-emailRouter.get('/queue', (_req: Request, res: Response) => {
+emailRouter.get('/queue', requireStaff, (_req: Request, res: Response) => {
   const queue = loadQueue()
   res.json({ queue: queue.map(({ smtpConfig: _s, ...rest }) => rest) })
 })

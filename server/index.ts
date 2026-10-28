@@ -13,142 +13,99 @@ import { downloadRouter } from './routes/download'
 import { emailRouter, processEmailQueue } from './routes/email'
 import { smsRouter, processSmsQueue } from './routes/sms'
 import { ticketRouter } from './routes/tickets'
-import { paymentRouter } from './routes/payments'
+import { paymentRouter, startPaymentReconciler } from './routes/payments'
+import { printRouter, autoSetupPrinter } from './routes/print'
 import { TicketManager } from './ticketManager'
+import { isAllowedOrigin, initStaffPin, requireStaff, clientIp } from './security'
+import { getAllLocalSubnetPrefixes, getPrimaryLanAddress } from './network'
+export { getAllLocalSubnetPrefixes }
 
-const PORT = 3847
+const PORT = Number(process.env.PORT) || 3847
 
-let discoveredPiIp: string | null = '192.168.29.69'
+// ─── Pi camera discovery ─────────────────────────────────────────────────────
+// Three ways the laptop learns where the booth Pi is, fastest first:
+//   1. the Pi announces itself (pi-camera.py → POST /api/camera/announce every 10 s)
+//   2. mDNS name raspberrypi.local
+//   3. background scan of the laptop's /24 subnet(s)
+// Requests never wait for a scan: they use the last known address while the background loop works.
+let discoveredPiIp: string | null = null
 let lastPiCheckTime = 0
+let lastAnnounceTime = 0
+let scanInFlight: Promise<string | null> | null = null
 
 export async function testCameraIp(ip: string, timeoutMs = 500): Promise<boolean> {
   try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
-    const res = await fetch(`http://${ip}:8081/health`, { signal: controller.signal })
-    clearTimeout(timer)
+    const res = await fetch(`http://${ip}:8081/health`, { signal: AbortSignal.timeout(timeoutMs) })
     if (res.ok) return true
   } catch {}
   try {
-    const controller2 = new AbortController()
-    const timer2 = setTimeout(() => controller2.abort(), timeoutMs)
-    const res2 = await fetch(`http://${ip}:8080/frame?t=${Date.now()}`, { signal: controller2.signal })
-    clearTimeout(timer2)
+    const res2 = await fetch(`http://${ip}:8080/health`, { signal: AbortSignal.timeout(timeoutMs) })
     if (res2.ok) return true
   } catch {}
   return false
 }
 
-export function getAllLocalSubnetPrefixes(): string[] {
-  const nets = os.networkInterfaces()
-  const prefixes = new Set<string>()
-  for (const name of Object.keys(nets)) {
-    for (const net of nets[name] || []) {
-      if (net.family === 'IPv4' && !net.internal && net.address) {
-        const lastDot = net.address.lastIndexOf('.')
-        if (lastDot > 0) {
-          prefixes.add(net.address.substring(0, lastDot))
-        }
-      }
-    }
-  }
-  return Array.from(prefixes)
-}
-
 export async function scanSubnetForPi(): Promise<string | null> {
-  const prefixes = getAllLocalSubnetPrefixes()
-  if (prefixes.length === 0) prefixes.push('192.168.29')
-
-  // Check known quick candidate list first
-  const quickList = Array.from(new Set([
-    discoveredPiIp,
-    '192.168.29.69',
-    '192.168.29.27',
-    ...prefixes.map(p => `${p}.69`),
-    ...prefixes.map(p => `${p}.27`),
-    ...prefixes.map(p => `${p}.70`),
-    '127.0.0.1',
-    'localhost',
-  ])).filter(Boolean) as string[]
-
-  for (const ip of quickList) {
-    if (await testCameraIp(ip, 400)) {
-      discoveredPiIp = ip
-      lastPiCheckTime = Date.now()
-      return ip
-    }
-  }
-
-  // Parallel scan across entire /24 subnet(s) in batches
-  for (const prefix of prefixes) {
+  for (const prefix of getAllLocalSubnetPrefixes()) {
     const allIps = Array.from({ length: 254 }, (_, i) => `${prefix}.${i + 1}`)
-    const batchSize = 35
-    for (let i = 0; i < allIps.length; i += batchSize) {
-      const batch = allIps.slice(i, i + batchSize)
-      const results = await Promise.all(
-        batch.map(async (ip) => {
-          const isAlive = await testCameraIp(ip, 350)
-          return isAlive ? ip : null
-        })
-      )
+    for (let i = 0; i < allIps.length; i += 64) {
+      const results = await Promise.all(allIps.slice(i, i + 64).map(async ip => (await testCameraIp(ip, 400)) ? ip : null))
       const found = results.find(Boolean)
-      if (found) {
-        discoveredPiIp = found
-        lastPiCheckTime = Date.now()
-        console.log(`[Camera] Discovered active camera on network at IP: ${found}`)
-        return found
-      }
+      if (found) return found
     }
   }
-
   return null
 }
 
-export async function findRaspberryPiIp(): Promise<string> {
-  // If we already have a discovered IP and recently verified, return it
-  if (discoveredPiIp && (Date.now() - lastPiCheckTime < 10000)) {
-    return discoveredPiIp
-  }
+function setPiIp(ip: string, how: string) {
+  if (discoveredPiIp !== ip) console.log(`[Camera] Booth Pi at ${ip} (${how})`)
+  discoveredPiIp = ip
+  lastPiCheckTime = Date.now()
+}
 
-  if (discoveredPiIp && await testCameraIp(discoveredPiIp, 450)) {
+async function discoverPiOnce(): Promise<string | null> {
+  if (discoveredPiIp && await testCameraIp(discoveredPiIp, 600)) {
     lastPiCheckTime = Date.now()
     return discoveredPiIp
   }
-
-  // 1. Try mDNS resolution (works on Windows/macOS/Linux via AF_INET)
   try {
     const ip = await new Promise<string>((resolve, reject) => {
-      dns.lookup('raspberrypi.local', { family: 4 }, (err, address) => {
-        if (err || !address) reject(err)
-        else resolve(address)
-      })
+      dns.lookup('raspberrypi.local', { family: 4 }, (err, address) => (err || !address ? reject(err) : resolve(address)))
     })
-    if (ip && await testCameraIp(ip, 450)) {
-      discoveredPiIp = ip
-      lastPiCheckTime = Date.now()
-      return ip
-    }
+    if (await testCameraIp(ip, 600)) { setPiIp(ip, 'mDNS'); return ip }
   } catch {}
+  const found = await scanSubnetForPi()
+  if (found) { setPiIp(found, 'subnet scan'); return found }
+  return null
+}
 
-  // 2. Full subnet scanning
-  const foundIp = await scanSubnetForPi()
-  if (foundIp) {
-    return foundIp
+/** Background loop: keeps discoveredPiIp fresh. Cheap health check when known, scan only when lost. */
+function startPiDiscoveryLoop() {
+  const tick = async () => {
+    const announcedRecently = Date.now() - lastAnnounceTime < 25_000
+    if (!announcedRecently && !scanInFlight) {
+      scanInFlight = discoverPiOnce().catch(() => null).finally(() => { scanInFlight = null })
+    }
   }
+  tick()
+  setInterval(tick, 10_000).unref()
+}
 
-  return discoveredPiIp || '192.168.29.27'
+export function recordPiAnnounce(ip: string) {
+  lastAnnounceTime = Date.now()
+  setPiIp(ip, 'announced')
+}
+
+/** Never blocks on a scan; returns the best address known right now. */
+export async function findRaspberryPiIp(): Promise<string> {
+  if (discoveredPiIp) return discoveredPiIp
+  // First request after boot: give an in-flight scan a moment, then fall back to the mDNS name
+  if (scanInFlight) await Promise.race([scanInFlight, new Promise(r => setTimeout(r, 1500))])
+  return discoveredPiIp || 'raspberrypi.local'
 }
 
 export function getLocalIpAddress(): string {
-  const nets = os.networkInterfaces()
-  for (const name of Object.keys(nets)) {
-    for (const net of nets[name] || []) {
-      if (net.family === 'IPv4' && !net.internal) {
-        return net.address
-      }
-    }
-  }
-  return '127.0.0.1'
+  return getPrimaryLanAddress()
 }
 
 let server: http.Server | null = null
@@ -175,15 +132,24 @@ export function getVaultManager() {
 
 export async function startServer(dataPath: string): Promise<void> {
   userDataPath = dataPath
+  initStaffPin(dataPath)
   ticketManager = new TicketManager(dataPath)
   
   const app = express()
 
   // ─── Middleware ────────────────────────────────────────────────────────────
+  // Only pages served from localhost / the private LAN may call the API. With `origin: true`
+  // any internet website open on the ticket laptop could drive these endpoints.
   app.use(cors({
-    origin: true,
+    origin: (origin, cb) => cb(null, isAllowedOrigin(origin)),
     credentials: true,
   }))
+  app.use((req, res, next) => {
+    if (!isAllowedOrigin(req.headers.origin)) {
+      return res.status(403).json({ error: 'Origin not allowed' })
+    }
+    next()
+  })
   
   app.use(express.json({ limit: '25mb' }))
   app.use(express.urlencoded({ extended: true, limit: '25mb' }))
@@ -232,6 +198,9 @@ export async function startServer(dataPath: string): Promise<void> {
   // ─── Secure Ticket Vault Media Streaming ──────────────────────────────────
   app.get('/vault/:ticketCode/:folder/:filename', (req: Request, res: Response) => {
     const ticketCode = typeof req.params.ticketCode === 'string' ? req.params.ticketCode.replace(/^#/, '').trim() : ''
+    if (!/^\d{4}$/.test(ticketCode)) {
+      return res.status(400).send('Invalid ticket code')
+    }
     const folder = typeof req.params.folder === 'string' ? req.params.folder : ''
     const filename = typeof req.params.filename === 'string' ? req.params.filename : ''
 
@@ -277,6 +246,7 @@ export async function startServer(dataPath: string): Promise<void> {
   app.use('/api/email', emailRouter)
   app.use('/api/sms', smsRouter)
   app.use('/api/tickets', ticketRouter)
+  app.use('/api/print', printRouter)
   app.use('/api', paymentRouter)
   app.use('/website', express.static(path.resolve(__dirname, '..', 'website')))
 
@@ -289,7 +259,7 @@ export async function startServer(dataPath: string): Promise<void> {
   })
 
   // Template Management: Remove selected templates permanently from code
-  app.post('/api/templates/remove', (req: Request, res: Response) => {
+  app.post('/api/templates/remove', requireStaff, (req: Request, res: Response) => {
     try {
       const { ids } = req.body as { ids: string[] }
       if (!Array.isArray(ids) || ids.length === 0) {
@@ -313,6 +283,11 @@ export async function startServer(dataPath: string): Promise<void> {
       console.error('[Server] Error removing templates:', err.message)
       res.status(500).json({ error: err.message })
     }
+  })
+
+  // Lets guest-facing stations check an attendant's PIN (reprints, cash upgrades) without exposing it
+  app.post('/api/staff/verify', requireStaff, (_req: Request, res: Response) => {
+    res.json({ success: true })
   })
 
   // Health check
@@ -348,10 +323,20 @@ export async function startServer(dataPath: string): Promise<void> {
     })
   })
 
+  // The booth Pi's camera service calls this every 10 s: the laptop then knows the Pi's current IP
+  // without scanning, even after the router hands out a new address.
+  app.post('/api/camera/announce', (req: Request, res: Response) => {
+    const ip = clientIp(req)
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return res.status(400).json({ error: 'IPv4 peer required' })
+    recordPiAnnounce(ip)
+    io?.emit('pi:status', { connected: true, ipAddress: ip, timestamp: new Date().toISOString() })
+    res.json({ success: true, serverTime: new Date().toISOString() })
+  })
+
   // Manual IP update
-  app.post('/api/camera/set-ip', (req: Request, res: Response) => {
+  app.post('/api/camera/set-ip', requireStaff, (req: Request, res: Response) => {
     const { ip } = req.body || {}
-    if (ip && typeof ip === 'string') {
+    if (ip && typeof ip === 'string' && /^[a-zA-Z0-9.-]{1,253}$/.test(ip.trim())) {
       discoveredPiIp = ip.trim()
       lastPiCheckTime = Date.now()
       console.log(`[Camera] Manual Pi IP set to: ${discoveredPiIp}`)
@@ -383,7 +368,10 @@ export async function startServer(dataPath: string): Promise<void> {
   // Camera Zoom Proxy
   app.all('/api/camera/zoom', async (req: Request, res: Response) => {
     const piIp = await findRaspberryPiIp()
-    const qs = new URLSearchParams(req.query as any).toString()
+    const params = new URLSearchParams()
+    if (typeof req.query.level === 'string' && /^\d+(\.\d+)?$/.test(req.query.level)) params.set('level', req.query.level)
+    if (typeof req.query.roi === 'string' && /^[\d.,]+$/.test(req.query.roi)) params.set('roi', req.query.roi)
+    const qs = params.toString()
     try {
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), 2000)
@@ -418,6 +406,28 @@ export async function startServer(dataPath: string): Promise<void> {
     } catch (err: any) {
       res.status(500).json({ error: 'Capture proxy failed', details: err.message })
     }
+  })
+
+  // ─── Production UI (single port: http://<laptop-ip>:3847) ──────────────────
+  // `npm run build` then `npm start` — no Vite dev server needed at events.
+  const distDir = path.resolve(__dirname, '..', 'dist')
+  if (fs.existsSync(path.join(distDir, 'index.html'))) {
+    app.use(express.static(distDir, { index: false, maxAge: '1h' }))
+    app.get(/^\/(?!api\/|sessions\/|vault\/|website\/|socket\.io\/).*/, (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache')
+      res.sendFile(path.join(distDir, 'index.html'))
+    })
+  }
+
+  app.use('/api', (_req: Request, res: Response) => {
+    res.status(404).json({ error: 'Unknown API endpoint' })
+  })
+
+  // JSON error handler (malformed JSON bodies etc.) so clients never get HTML stack traces
+  app.use((err: any, _req: Request, res: Response, _next: () => void) => {
+    const status = err?.status || err?.statusCode || 500
+    if (status >= 500) console.error('[Server] Unhandled error:', err)
+    res.status(status).json({ error: status >= 500 ? 'Internal server error' : (err?.message || 'Bad request') })
   })
 
   // ─── HTTP Server ──────────────────────────────────────────────────────────
@@ -467,29 +477,21 @@ export async function startServer(dataPath: string): Promise<void> {
       }
     })
 
-    // Direct ticket status change
-    socket.on('ticket:status_change', (data: { ticketId: string; status: any; photoCount?: number; printCount?: number; sessionId?: string }) => {
-      if (ticketManager && data.ticketId && data.status) {
-        const updated = ticketManager.updateTicketStatus(data.ticketId, data.status, {
-          photoCount: data.photoCount,
-          printCount: data.printCount,
-          sessionId: data.sessionId,
-        })
-        if (updated) {
-          io?.emit('ticket:updated', updated)
-          io?.emit('queue:updated', {
-            tickets: ticketManager.listTickets(),
-            nextCode: ticketManager.getNextCode(),
-          })
-        }
-      }
-    })
+    // NOTE: the old unauthenticated `ticket:status_change` socket event was removed.
+    // Ticket mutations go through the HTTP API, which validates transitions.
   })
 
   // Periodic offline queue processor (processes pending emails & SMS every 20 seconds)
-  backgroundWorkerTimer = setInterval(() => {
-    processEmailQueue().catch(err => console.error('[Worker] Email worker error:', err))
-    processSmsQueue().catch(err => console.error('[Worker] SMS worker error:', err))
+  let workerBusy = false
+  backgroundWorkerTimer = setInterval(async () => {
+    if (workerBusy) return // a slow SMTP/Twilio run must not overlap the next tick (double sends)
+    workerBusy = true
+    try {
+      await processEmailQueue().catch(err => console.error('[Worker] Email worker error:', err))
+      await processSmsQueue().catch(err => console.error('[Worker] SMS worker error:', err))
+    } finally {
+      workerBusy = false
+    }
   }, 20000)
 
   // Bind host: bind to 0.0.0.0 only when remote Pi / LAN access is enabled
@@ -499,6 +501,10 @@ export async function startServer(dataPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
     server!.listen(PORT, bindAddress, () => {
       console.log(`[Server] Photobooth server running on ${bindAddress}:${PORT}`)
+      // Find the Wi-Fi printer in the background (no setup needed when there is exactly one)
+      autoSetupPrinter().catch(err => console.warn('[Print] Printer auto-setup failed:', err?.message))
+      startPaymentReconciler()
+      startPiDiscoveryLoop()
       resolve()
     })
     server!.on('error', reject)

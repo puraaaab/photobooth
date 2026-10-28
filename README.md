@@ -60,6 +60,50 @@ npm run preview
 
 ---
 
+## 🏁 Running at an Event (Production)
+
+```powershell
+# On the ticket-desk laptop (it runs the server and is the "staff" machine)
+copy .env.example .env          # fill in Razorpay keys + STAFF_PIN
+npm run build                   # once per code change
+npm start                       # UI + API + media on ONE port: http://<laptop-ip>:3847
+```
+
+| Station | Device | Open |
+| :--- | :--- | :--- |
+| Ticket desk | Laptop (runs the server) | `http://localhost:3847/?view=ticket` |
+| Photobooth | Raspberry Pi 4 + Camera Module 3 | automatic — run `pi-setup/setup-kiosk-client.sh` once; at every boot the Pi finds the laptop itself |
+| Editing station | iPad (Safari, Add to Home Screen) | scan the **Connect iPad** QR in the ticket desk's Printer & devices panel |
+
+**Plans** (one file: `src/constants/pricing.ts`): ₹99 = 2 strips (1 A5) · ₹169 = 4 strips (2 A5) · ₹229 = 6 strips (3 A5).
+Editing-station add-on: +₹79 per extra A5 sheet (2 strips).
+
+**Printing** — guests print from the iPad as before, but the sheet goes iPad → laptop → Wi-Fi printer over IPP
+(the protocol AirPrint uses), so there is no iOS print dialog and the server enforces copies per ticket. The
+printer is found automatically (PDF, JPEG or PWG raster printers). If no network printer is found, the
+iPad falls back to AirPrint.
+
+**Payments** — UPI uses a one-time Razorpay QR for the exact amount that confirms itself (server polls
+Razorpay; works even if the screen is closed). Cash is confirmed by the attendant. The old static UPI QR only
+appears if Razorpay QR Codes is unavailable.
+
+**Staff PIN** — requests from the laptop itself are trusted. The iPad and Pi are *guest-facing*: anything
+that touches money (mark paid, cash/UPI upgrade, reprint, issue/void tickets) needs the staff PIN, which
+the server checks (`STAFF_PIN` in `.env`, otherwise `data/staff-pin.txt`). 5 wrong tries → 60 s lockout.
+
+**Ticket lifecycle** enforced by the server for guest stations:
+`WAITING → IN_BOOTH → EDITING → PRINTING → COMPLETED`. A ticket can be shot once; if the booth crashes
+before any photo uploads, the same code can be re-entered. Staff can force any status from the desk.
+
+**Pi camera** — `public/pi-camera.py` uses picamera2: real 2304×1296 stills (sensor binned mode),
+hardware-encoded live preview, zoom without restarting. Env knobs: `STILL_W/STILL_H` (4608×2592 for full
+12 MP), `STILL_QUALITY`, `CAMERA_HDR=1`, `CAMERA_BACKEND=rpicam` (force legacy).
+
+> ⚠️ The Razorpay secret that used to be hard-coded in `server/routes/payments.ts` was pushed to GitHub.
+> Rotate it in the Razorpay dashboard and put the new keys only in `.env`.
+
+---
+
 ## 🔐 Passwords & Admin Access
 
 ### 1. Default Admin Credentials

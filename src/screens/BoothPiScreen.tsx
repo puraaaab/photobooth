@@ -7,15 +7,32 @@ import {
 } from 'lucide-react'
 
 // ─── Config ───────────────────────────────────────────────────────────────────
+/**
+ * True when this page runs in Chromium on the booth Pi itself (the kiosk script opens the URL with
+ * `&cam=local`). The camera is then simply http://localhost:8080 — no network lookup at all, and it
+ * keeps working whatever IP address the venue router hands out.
+ */
+export function isBoothKiosk(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    if (new URLSearchParams(window.location.search).get('cam') === 'local') {
+      localStorage.setItem('papit_cam_local', '1')
+      return true
+    }
+    return localStorage.getItem('papit_cam_local') === '1'
+  } catch {
+    return false
+  }
+}
+
 export function getSavedPiIp(): string {
   if (typeof window !== 'undefined') {
+    if (isBoothKiosk()) return 'localhost'
     const saved = localStorage.getItem('papit_pi_ip')
     if (saved && saved.trim()) return saved.trim()
-    if (window.location.hostname === 'raspberrypi.local' || window.location.hostname === '192.168.29.69') {
-      return 'localhost'
-    }
   }
-  return '192.168.29.69'
+  // Unknown yet: the laptop server discovers the Pi and the camera proxy (/api/camera/*) covers the gap
+  return 'raspberrypi.local'
 }
 
 export function setSavedPiIp(ip: string): void {
@@ -33,7 +50,7 @@ export const getBoothServerUrl = (): string => {
   if (window.location.hostname) {
     return `http://${window.location.hostname}:3847`
   }
-  return 'http://192.168.29.33:3847'
+  return 'http://localhost:3847'
 }
 
 export const MAIN_SERVER_URL = getBoothServerUrl()
@@ -42,7 +59,7 @@ export const getCameraStreamUrl = (piIp = getSavedPiIp()): string => {
   if (typeof window !== 'undefined' && (window as any).__CAMERA_STREAM_URL__) {
     return (window as any).__CAMERA_STREAM_URL__
   }
-  if (typeof window !== 'undefined' && (window.location.hostname === '192.168.29.69' || window.location.hostname === 'raspberrypi.local')) {
+  if (isBoothKiosk()) {
     return 'http://localhost:8080/stream'
   }
   return `http://${piIp}:8080/stream`
@@ -52,7 +69,7 @@ export const getCameraCaptureUrl = (piIp = getSavedPiIp()): string => {
   if (typeof window !== 'undefined' && (window as any).__CAMERA_CAPTURE_URL__) {
     return (window as any).__CAMERA_CAPTURE_URL__
   }
-  if (typeof window !== 'undefined' && (window.location.hostname === '192.168.29.69' || window.location.hostname === 'raspberrypi.local')) {
+  if (isBoothKiosk()) {
     return 'http://localhost:8081/capture'
   }
   return `http://${piIp}:8081/capture`
@@ -313,7 +330,7 @@ export function BoothPiScreen() {
         const res = await fetch(`${MAIN_SERVER_URL}/api/camera/discover`, { signal: AbortSignal.timeout(3000) })
         if (res.ok) {
           const data = await res.json()
-          if (data?.piIp) {
+          if (data?.piIp && data?.reachable && !isBoothKiosk()) {
             setActivePiIp(data.piIp)
             setSavedPiIp(data.piIp)
           }
@@ -385,7 +402,6 @@ export function BoothPiScreen() {
       const candidateEndpoints = [
         `${MAIN_SERVER_URL}/api/tickets/${code}`,
         typeof window !== 'undefined' ? `${window.location.origin}/api/tickets/${code}` : '',
-        `http://192.168.29.33:3847/api/tickets/${code}`,
         `http://localhost:3847/api/tickets/${code}`,
       ].filter(Boolean)
 
@@ -421,7 +437,13 @@ export function BoothPiScreen() {
         setState('ticket_entry')
         return
       }
-      if (ticket.status === 'IN_BOOTH') {
+      if (ticket.status === 'EDITING' || ticket.status === 'PRINTING') {
+        setErrorMsg(`Ticket #${code} has already been shot. Please head to the editing station!`)
+        setState('ticket_entry')
+        return
+      }
+      // IN_BOOTH with zero uploaded photos = the booth crashed/reloaded mid-shoot → let the guest resume
+      if (ticket.status === 'IN_BOOTH' && (ticket.photoCount ?? 0) > 0) {
         setErrorMsg(`Ticket #${code} is already in a booth session.`)
         setState('ticket_entry')
         return
@@ -438,19 +460,33 @@ export function BoothPiScreen() {
         body: JSON.stringify({ ticketCode: code }),
         signal: AbortSignal.timeout(5000),
       })
+      // Without a real server session every upload would be rejected and the guest's photos lost,
+      // so refuse to start instead of inventing a local-only session id.
       const sessData = sessRes.ok ? await sessRes.json() : {}
-      const newSessionId = sessData.sessionId || `local-${Date.now()}`
-      setSessionId(newSessionId)
-      setSessionToken(sessData.sessionToken || null)
-      setTicketId(ticket.id)
+      if (!sessData.sessionId) {
+        setErrorMsg('Could not start a session on the server. Please ask staff for help.')
+        setState('ticket_entry')
+        return
+      }
+      const newSessionId: string = sessData.sessionId
 
-      // Mark ticket as IN_BOOTH
-      await fetch(`${successfulBase}/api/tickets/${ticket.id}/status`, {
+      // Mark ticket as IN_BOOTH — the server rejects re-use of an already-shot ticket
+      const statusRes = await fetch(`${successfulBase}/api/tickets/${ticket.id}/status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'IN_BOOTH', sessionId: newSessionId }),
         signal: AbortSignal.timeout(4000),
-      }).catch(() => { })
+      }).catch(() => null)
+      if (statusRes && statusRes.status === 409) {
+        const d = await statusRes.json().catch(() => ({}))
+        setErrorMsg(d.error || `Ticket #${code} cannot be used again.`)
+        setState('ticket_entry')
+        return
+      }
+
+      setSessionId(newSessionId)
+      setSessionToken(sessData.sessionToken || null)
+      setTicketId(ticket.id)
 
       setState('session_start')
     } catch (err: any) {
@@ -468,12 +504,11 @@ export function BoothPiScreen() {
     const zoomCfg = ZOOM_LEVEL_ROIS[curZoomLvl] || ZOOM_LEVEL_ROIS['1']
     const activeRoi = zoomCfg.roi
     const activeScale = zoomCfg.scale
-    const currentIp = activePiIpRef.current || getSavedPiIp() || '192.168.29.69'
+    const currentIp = activePiIpRef.current || getSavedPiIp()
 
     // 1. Try port 8081 capture endpoints (:8081/capture) - RAW NATIVE HARDWARE SENSOR CAPTURE
     const candidateCaptureEndpoints = [
       `http://${currentIp}:8081/capture`,
-      'http://192.168.29.69:8081/capture',
       `${MAIN_SERVER_URL}/api/camera/capture`,
       getCameraCaptureUrl(currentIp),
       '/api/camera/capture',
@@ -635,7 +670,12 @@ export function BoothPiScreen() {
       while (queue.length > 0) {
         const item = queue.shift()
         if (item) {
-          await uploadOneShot(item, sid)
+          const ok = await uploadOneShot(item, sid)
+          // Free the in-memory JPEG once the server has it. Without this every session leaked
+          // ~30-60 MB of blobs and Chromium on a 2 GB Pi ran out of memory during long events.
+          if (ok && item.localUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(item.localUrl)
+          }
         }
       }
     }
@@ -675,31 +715,36 @@ export function BoothPiScreen() {
     setTimeout(poll, 2000)
   }, [])
 
+  // ─── Finalize: upload everything, then hand the ticket to the editing station ──
+  // Single path used by timer expiry, the shot safety cap and "finish early", so photos are
+  // never silently discarded.
+  const finalizeSession = useCallback(async () => {
+    isCompleteRef.current = true
+    clearAllTimers()
+    setState('session_done')
+    const sid = sessionIdRef.current
+    const tid = ticketIdRef.current
+    const currentShots = shotsRef.current.filter(s => !s.localUrl.startsWith('data:image/svg'))
+    const taken = currentShots.length
+
+    if (sid && currentShots.length > 0) {
+      await uploadAllShotsBatch(currentShots, sid)
+      startIntegrityPolling(sid, taken)
+    }
+    if (tid && sid && taken > 0) {
+      fetch(`${MAIN_SERVER_URL}/api/tickets/${tid}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'EDITING', sessionId: sid, photoCount: taken }),
+      }).catch(() => { })
+    }
+  }, [clearAllTimers, uploadAllShotsBatch, startIntegrityPolling])
+
   // ─── Start Per-Shot Countdown — loops continuously until session ends ─────
   const startShot = useCallback((index: number) => {
     if (isCompleteRef.current) return
     if (index >= MAX_SHOTS_SAFETY) {
-      // Safety cap reached — finalize
-      isCompleteRef.current = true
-      clearAllTimers()
-      setState('session_done')
-      const sid = sessionIdRef.current
-      const tid = ticketIdRef.current
-      const taken = shotsCountRef.current
-      const currentShots = shotsRef.current
-
-      if (sid && currentShots.length > 0) {
-        uploadAllShotsBatch(currentShots, sid).then(() => {
-          if (sid) startIntegrityPolling(sid, taken)
-          if (tid && sid) {
-            fetch(`${MAIN_SERVER_URL}/api/tickets/${tid}/status`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ status: 'EDITING', sessionId: sid, photoCount: taken }),
-            }).catch(() => { })
-          }
-        })
-      }
+      finalizeSession()
       return
     }
 
@@ -782,10 +827,12 @@ export function BoothPiScreen() {
         }, 1000)
       }
     }, 1000)
-  }, [capturePhoto, clearAllTimers, uploadAllShotsBatch, startIntegrityPolling])
+  }, [capturePhoto, finalizeSession])
 
   // ─── Start Full Session ───────────────────────────────────────────────────
   const startSession = useCallback(() => {
+    // Release anything left over from the previous guest (e.g. shots whose upload failed)
+    shotsRef.current.forEach(s => { if (s.localUrl.startsWith('blob:')) URL.revokeObjectURL(s.localUrl) })
     setShots([])
     shotsRef.current = []
     setShotIndex(0)
@@ -795,30 +842,24 @@ export function BoothPiScreen() {
     shotsCountRef.current = 0
 
     // Session timer fires when 90s expire — finalizes everything & uploads all shots!
-    startSessionTimer(async () => {
-      setState('session_done')
-      const sid = sessionIdRef.current
-      const tid = ticketIdRef.current
-      const taken = shotsCountRef.current
-      const currentShots = shotsRef.current
-
-      // Batch upload all locally captured photos now that shooting is complete!
-      if (sid && currentShots.length > 0) {
-        await uploadAllShotsBatch(currentShots, sid)
-      }
-
-      if (sid) startIntegrityPolling(sid, taken)
-      if (tid && sid) {
-        fetch(`${MAIN_SERVER_URL}/api/tickets/${tid}/status`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'EDITING', sessionId: sid, photoCount: taken }),
-        }).catch(() => { })
-      }
-    })
+    startSessionTimer(() => { finalizeSession() })
 
     startShot(0)
-  }, [startSessionTimer, startShot, startIntegrityPolling, uploadAllShotsBatch])
+  }, [startSessionTimer, startShot, finalizeSession])
+
+  const resetToIdleRef = useRef<() => void>(() => {})
+
+  // ─── Exit button during the shoot ─────────────────────────────────────────
+  // Previously this discarded every photo AND left the ticket stuck in IN_BOOTH.
+  // Now: if anything was captured, finish early and upload; otherwise just go idle
+  // (the ticket stays IN_BOOTH with 0 photos, which the guest can re-enter).
+  const handleExitDuringShoot = useCallback(() => {
+    if (shotsRef.current.length > 0) {
+      finalizeSession()
+    } else {
+      resetToIdleRef.current()
+    }
+  }, [finalizeSession])
 
   // ─── Reset to Idle ────────────────────────────────────────────────────────
   const resetToIdle = useCallback(() => {
@@ -836,6 +877,7 @@ export function BoothPiScreen() {
     setSessionTime(SESSION_DURATION_S)
     setState('idle')
   }, [clearAllTimers])
+  resetToIdleRef.current = resetToIdle
 
   // ─── Numpad Handler ───────────────────────────────────────────────────────
   const handleNumpad = useCallback((key: string) => {
@@ -1272,7 +1314,7 @@ export function BoothPiScreen() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <CaptureTopBar shotIndex={shotIndex} timeLeft={sessionTime} onReset={resetToIdle} />
+            <CaptureTopBar shotIndex={shotIndex} timeLeft={sessionTime} onReset={handleExitDuringShoot} />
 
             {/* Camera feed with countdown overlay */}
             <div style={styles.viewfinderWrap}>
@@ -1463,7 +1505,9 @@ export function BoothPiScreen() {
                       {/* Thumbnail — variable height for masonry */}
                       {shot.localUrl ? (
                         <img
-                          src={shot.localUrl}
+                          src={shot.uploadStatus === 'success' && shot.uploadedUrl
+                            ? `${MAIN_SERVER_URL}${shot.uploadedUrl.replace('/previews/', '/thumbnails/').replace('-preview.jpg', '-thumb.jpg')}`
+                            : shot.localUrl}
                           style={{ ...styles.uploadThumb, height: thumbH }}
                           alt={`Shot ${i + 1}`}
                         />
@@ -1604,10 +1648,14 @@ function CameraStream({
   const imageRef = externalImageRef || internalImageRef
 
   const [streamMode, setStreamModeState] = useState<'loading' | 'webrtc' | 'mjpeg' | 'error'>('loading')
+  const streamModeRef = useRef<'loading' | 'webrtc' | 'mjpeg' | 'error'>('loading')
   const setStreamMode = useCallback((mode: 'loading' | 'webrtc' | 'mjpeg' | 'error') => {
     setStreamModeState(mode)
-    onStreamModeChange?.(mode)
-  }, [onStreamModeChange])
+    if (streamModeRef.current !== mode) {
+      streamModeRef.current = mode
+      onStreamModeChangeRef.current?.(mode)
+    }
+  }, [])
 
   const [currentBlobUrl, setCurrentBlobUrl] = useState<string | null>(null)
   const currentBlobRef = useRef<string | null>(null)
@@ -1616,14 +1664,26 @@ function CameraStream({
   const [piIp, setPiIpState] = useState<string>(getSavedPiIp())
   const setPiIp = useCallback((ip: string) => {
     setPiIpState(ip)
-    onPiIpChange?.(ip)
-  }, [onPiIpChange])
+    onPiIpChangeRef.current?.(ip)
+  }, [])
 
   const [customIpInput, setCustomIpInput] = useState<string>(getSavedPiIp())
   const [isDetecting, setIsDetecting] = useState<boolean>(false)
   const [statusNote, setStatusNote] = useState<string>('')
   const [internalZoom, setInternalZoom] = useState<string>('1')
   const [isSwitchingZoom, setIsSwitchingZoom] = useState<boolean>(false)
+
+  // Parent passes inline callbacks; keep them in refs so the frame loop below is not torn down
+  // (and the webcam fallback stopped) on every parent re-render — that happened once per second
+  // during the countdown because the session clock re-renders the booth screen.
+  const onStreamActiveRef = useRef(onStreamActive)
+  const onErrorRef = useRef(onError)
+  const onStreamModeChangeRef = useRef(onStreamModeChange)
+  const onPiIpChangeRef = useRef(onPiIpChange)
+  onStreamActiveRef.current = onStreamActive
+  onErrorRef.current = onError
+  onStreamModeChangeRef.current = onStreamModeChange
+  onPiIpChangeRef.current = onPiIpChange
 
   const activeZoomLvl = externalZoom || internalZoom
   const zoomConfig = ZOOM_LEVEL_ROIS[activeZoomLvl] || ZOOM_LEVEL_ROIS['1']
@@ -1647,11 +1707,11 @@ function CameraStream({
         videoRef.current.play().catch(console.warn)
       }
       setStreamMode('webrtc')
-      onStreamActive?.()
+      onStreamActiveRef.current?.()
     } catch (err) {
       console.warn('[BoothPi] Local webcam fallback unavailable:', err)
     }
-  }, [videoRef, onStreamActive])
+  }, [videoRef, setStreamMode])
 
   const stopLocalWebcam = useCallback(() => {
     if (localStreamRef.current) {
@@ -1671,7 +1731,7 @@ function CameraStream({
         const res = await fetch(`${MAIN_SERVER_URL}/api/camera/discover`, { signal: AbortSignal.timeout(3500) })
         if (res.ok) {
           const data = await res.json()
-          if (!unmounted && data?.piIp) {
+          if (!unmounted && data?.piIp && data?.reachable && !isBoothKiosk()) {
             setPiIp(data.piIp)
             setCustomIpInput(data.piIp)
             setSavedPiIp(data.piIp)
@@ -1705,7 +1765,6 @@ function CameraStream({
 
     const candidates = [
       piIp,
-      '192.168.29.27',
       typeof window !== 'undefined' ? window.location.hostname : '',
       'raspberrypi.local',
       'localhost',
@@ -1752,7 +1811,6 @@ function CameraStream({
         `http://${piIp}:8080/zoom?${qs}`,
         `${MAIN_SERVER_URL}/api/camera/zoom?${qs}`,
         `/api/camera/zoom?${qs}`,
-        `http://192.168.29.69:8080/zoom?${qs}`,
       ]
       for (const ep of endpoints) {
         fetch(ep, { signal: AbortSignal.timeout(1500) }).catch(() => {})
@@ -1770,10 +1828,7 @@ function CameraStream({
     let failureCount = 0
 
     const candidateEndpoints = [
-      (typeof window !== 'undefined' && (window.location.hostname === 'raspberrypi.local' || window.location.hostname === piIp))
-        ? 'http://localhost:8080/frame'
-        : `http://${piIp}:8080/frame`,
-      'http://192.168.29.69:8080/frame',
+      isBoothKiosk() ? 'http://localhost:8080/frame' : `http://${piIp}:8080/frame`,
       `${MAIN_SERVER_URL}/api/camera/frame`,
     ]
 
@@ -1802,7 +1857,7 @@ function CameraStream({
             setCurrentBlobUrl(newUrl)
             setStreamMode('mjpeg')
             stopLocalWebcam()
-            onStreamActive?.()
+            onStreamActiveRef.current?.()
           }
         } else {
           failureCount++
@@ -1823,7 +1878,7 @@ function CameraStream({
         }
         if (failureCount > 10 && active && !currentBlobRef.current && !localStreamRef.current) {
           setStreamMode('error')
-          onError?.()
+          onErrorRef.current?.()
         }
       } finally {
         inFlight = false
@@ -1844,7 +1899,7 @@ function CameraStream({
       }
       stopLocalWebcam()
     }
-  }, [piIp, onStreamActive, onError, startLocalWebcam, stopLocalWebcam])
+  }, [piIp, startLocalWebcam, stopLocalWebcam, setStreamMode])
 
   const handleRetry = () => {
     setStreamMode('loading')
