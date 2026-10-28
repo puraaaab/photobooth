@@ -76,58 +76,114 @@ if [ -n "${1:-}" ]; then echo "${PC_HOST}:${PC_PORT}" > "${USER_HOME}/.photoboot
 # Kiosk launcher (quoted heredoc: written literally, evaluated on the Pi at boot)
 cat << 'LAUNCHER' > "${USER_HOME}/launch-photobooth.sh"
 #!/bin/bash
-# Disable screen blanking & power management, hide the cursor
+# Photobooth kiosk + watchdog.
+#   booth-off  → close the kiosk and keep it closed (use the Pi for other work)
+#   booth-on   → bring the kiosk back (within ~5 s)
+# The kiosk uses its OWN Chromium profile, so any browser you open yourself is a separate
+# program: the watchdog never closes it, and the kiosk never opens inside it.
+PAUSE_FILE="$HOME/.photobooth-kiosk-off"
+PROFILE="$HOME/.config/photobooth-kiosk"
+MATCH="user-data-dir=$PROFILE"
+
 xset s off 2>/dev/null || true
 xset s noblank 2>/dev/null || true
 xset -dpms 2>/dev/null || true
-command -v unclutter >/dev/null 2>&1 && unclutter -idle 0.5 -root &
 
 BROWSER_BIN=$(which chromium-browser 2>/dev/null || which chromium 2>/dev/null || echo chromium-browser)
 
+paused() { [ -f "$PAUSE_FILE" ]; }
+
 find_server() {
     until SERVER="$("$HOME/find-server.sh")"; do
+        paused && return 1
         echo "[kiosk] Laptop not found yet, retrying in 3s..."
         sleep 3
     done
 }
 
 start_browser() {
-    # Match on our own URL: /usr/bin/chromium-browser is only a wrapper, the real process runs from
-    # /usr/lib/chromium*/, so matching the wrapper path never found it (and spawned a new window every 20 s)
-    pkill -f "view=booth&cam=local" 2>/dev/null
+    paused && return
+    # Only ever touches the kiosk's own browser (matched by its private profile directory)
+    pkill -f "$MATCH" 2>/dev/null
     sleep 1
     # cam=local: the booth page uses this Pi's own camera at localhost:8080
-    $BROWSER_BIN --kiosk --noerrdialogs --disable-infobars --touch-events=enabled --disable-pinch         --overscroll-history-navigation=0 --disable-translate --check-for-update-interval=31536000         --disable-session-crashed-bubble --disable-features=Translate         "http://${SERVER}/?view=booth&cam=local" &
+    "$BROWSER_BIN" --user-data-dir="$PROFILE" --kiosk --noerrdialogs --disable-infobars \
+        --touch-events=enabled --disable-pinch --overscroll-history-navigation=0 --disable-translate \
+        --check-for-update-interval=31536000 --disable-session-crashed-bubble --disable-features=Translate \
+        "http://${SERVER}/?view=booth&cam=local" >/dev/null 2>&1 &
 }
 
-find_server
-start_browser
-
-# Watchdog: if the laptop disappears for ~60s (new IP after a router restart, laptop rebooted),
-# find it again and reload the kiosk. Also restarts Chromium if it crashed.
+SERVER=""
 misses=0
 while true; do
-    sleep 20
+    if paused; then
+        sleep 5
+        continue
+    fi
+    if [ -z "$SERVER" ]; then
+        find_server || continue
+        start_browser
+    fi
+    sleep 5
+    paused && continue
     if curl -fs -m 3 "http://${SERVER}/api/health" >/dev/null; then
         misses=0
-        pgrep -f "view=booth&cam=local" >/dev/null || start_browser
+        pgrep -f "$MATCH" >/dev/null || start_browser   # crashed or closed by mistake
     else
+        # Laptop gone for ~45 s (new IP after a router restart, laptop rebooted): find it again
         misses=$((misses + 1))
-        if [ $misses -ge 3 ]; then
+        if [ $misses -ge 9 ]; then
             OLD="$SERVER"
-            find_server
-            [ "$SERVER" != "$OLD" ] && echo "[kiosk] Laptop moved $OLD -> $SERVER"
-            start_browser
+            SERVER=""
+            find_server && { [ "$SERVER" != "$OLD" ] && echo "[kiosk] Laptop moved $OLD -> $SERVER"; start_browser; }
             misses=0
         fi
     fi
 done
 LAUNCHER
-
 chmod +x "${USER_HOME}/launch-photobooth.sh"
 
-# Autostart desktop entry
+# On/off switches: terminal commands + desktop icons
+mkdir -p "${USER_HOME}/.local/bin"
+cat << 'OFF' > "${USER_HOME}/.local/bin/booth-off"
+#!/bin/bash
+# Close the photobooth kiosk and keep it closed until `booth-on`.
+touch "$HOME/.photobooth-kiosk-off"
+pkill -f "user-data-dir=$HOME/.config/photobooth-kiosk" 2>/dev/null
+echo "Photobooth kiosk OFF. Run booth-on (or the 'Booth ON' desktop icon) to bring it back."
+OFF
+cat << 'ON' > "${USER_HOME}/.local/bin/booth-on"
+#!/bin/bash
+# Bring the photobooth kiosk back (the watchdog relaunches it within ~5 s).
+rm -f "$HOME/.photobooth-kiosk-off"
+pgrep -f launch-photobooth.sh >/dev/null || (nohup "$HOME/launch-photobooth.sh" >/dev/null 2>&1 &)
+echo "Photobooth kiosk ON."
+ON
+chmod +x "${USER_HOME}/.local/bin/booth-off" "${USER_HOME}/.local/bin/booth-on"
+ln -sf "${USER_HOME}/.local/bin/booth-off" "${USER_HOME}/booth-off"
+ln -sf "${USER_HOME}/.local/bin/booth-on" "${USER_HOME}/booth-on"
+
+if [ -d "${USER_HOME}/Desktop" ]; then
+    for mode in on off; do
+        label=$([ "$mode" = on ] && echo "Booth ON" || echo "Booth OFF")
+        cat << ICON > "${USER_HOME}/Desktop/booth-${mode}.desktop"
+[Desktop Entry]
+Type=Application
+Name=${label}
+Exec=${USER_HOME}/.local/bin/booth-${mode}
+Icon=camera-photo
+Terminal=false
+ICON
+        chmod +x "${USER_HOME}/Desktop/booth-${mode}.desktop"
+    done
+fi
+
+# Autostart at boot (KIOSK_AUTOSTART=0 → never start by itself; open the booth manually instead)
 mkdir -p "${USER_HOME}/.config/autostart"
+if [ "${KIOSK_AUTOSTART:-1}" = "0" ]; then
+    rm -f "${USER_HOME}/.config/autostart/photobooth-kiosk.desktop"
+    echo -e "${YELLOW}Kiosk autostart disabled. Start it any time with: booth-on${RESET}"
+else
 cat << DESKTOP > "${USER_HOME}/.config/autostart/photobooth-kiosk.desktop"
 [Desktop Entry]
 Type=Application
@@ -136,6 +192,7 @@ Exec=${USER_HOME}/launch-photobooth.sh
 Hidden=false
 X-GNOME-Autostart-enabled=true
 DESKTOP
+fi
 
 echo -e ""
 echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
@@ -144,5 +201,6 @@ echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━�
 echo -e "• Camera Server:  ${BOLD}Running in background on port 8080/8081${RESET}"
 echo -e "• Kiosk Display:  ${BOLD}Configured to boot directly to ${PC_URL}${RESET}"
 echo -e "• Status Check:   ${BOLD}sudo systemctl status photobooth-camera${RESET}"
+echo -e "• Other work:     ${BOLD}booth-off${RESET} closes the kiosk, ${BOLD}booth-on${RESET} brings it back (or the desktop icons)"
 echo -e ""
 echo -e "${CYAN}Now simply reboot your Pi: ${BOLD}sudo reboot${RESET}"
