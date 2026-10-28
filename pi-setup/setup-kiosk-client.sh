@@ -197,6 +197,8 @@ if [ "${KIOSK_AUTOSTART:-1}" = "0" ]; then
     rm -f "${USER_HOME}/.config/autostart/photobooth-kiosk.desktop"
     echo -e "${YELLOW}Kiosk autostart disabled. Start it any time with: booth-on${RESET}"
 else
+# Running setup means "I want the booth": clear a leftover booth-off pause (it survives reboots)
+rm -f "${USER_HOME}/.photobooth-kiosk-off"
 cat << DESKTOP > "${USER_HOME}/.config/autostart/photobooth-kiosk.desktop"
 [Desktop Entry]
 Type=Application
