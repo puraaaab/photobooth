@@ -1,0 +1,517 @@
+[
+  {
+    "id": "exit-sign",
+    "name": "Vintage Exit Sign",
+    "category": "retro",
+    "tags": [
+      "sign",
+      "retro",
+      "arrow",
+      "exit"
+    ],
+    "url": "/stickers/retro/exit-sign.png",
+    "width": 192,
+    "height": 306,
+    "aspectRatio": 0.627
+  },
+  {
+    "id": "headphones",
+    "name": "DJ Headphones",
+    "category": "music_misc",
+    "tags": [
+      "music",
+      "audio",
+      "sound",
+      "headphones"
+    ],
+    "url": "/stickers/music_misc/headphones.png",
+    "width": 126,
+    "height": 118,
+    "aspectRatio": 1.068
+  },
+  {
+    "id": "astronaut-plane",
+    "name": "Paper Plane Astronaut",
+    "category": "pop_culture",
+    "tags": [
+      "space",
+      "astronaut",
+      "fly",
+      "plane"
+    ],
+    "url": "/stickers/pop_culture/astronaut-plane.png",
+    "width": 295,
+    "height": 245,
+    "aspectRatio": 1.204
+  },
+  {
+    "id": "bugs-bunny",
+    "name": "Bugs Bunny What's Up Doc",
+    "category": "pop_culture",
+    "tags": [
+      "cartoon",
+      "bunny",
+      "looney",
+      "badge"
+    ],
+    "url": "/stickers/pop_culture/bugs-bunny.png",
+    "width": 201,
+    "height": 203,
+    "aspectRatio": 0.99
+  },
+  {
+    "id": "cinema-ticket",
+    "name": "Admit One Cinema Ticket",
+    "category": "retro",
+    "tags": [
+      "movie",
+      "ticket",
+      "cinema",
+      "vintage"
+    ],
+    "url": "/stickers/retro/cinema-ticket.png",
+    "width": 195,
+    "height": 110,
+    "aspectRatio": 1.773
+  },
+  {
+    "id": "basf-cassette",
+    "name": "BASF Tape Cassette",
+    "category": "retro",
+    "tags": [
+      "cassette",
+      "tape",
+      "music",
+      "80s",
+      "analog"
+    ],
+    "url": "/stickers/retro/basf-cassette.png",
+    "width": 89,
+    "height": 140,
+    "aspectRatio": 0.636
+  },
+  {
+    "id": "spiderman-badge",
+    "name": "Spider-Man Mask Badge",
+    "category": "pop_culture",
+    "tags": [
+      "marvel",
+      "spiderman",
+      "superhero",
+      "comic"
+    ],
+    "url": "/stickers/pop_culture/spiderman-badge.png",
+    "width": 169,
+    "height": 165,
+    "aspectRatio": 1.024
+  },
+  {
+    "id": "main-character-clapper",
+    "name": "Main Character Clapperboard",
+    "category": "pop_culture",
+    "tags": [
+      "movie",
+      "hollywood",
+      "clapper",
+      "cinema"
+    ],
+    "url": "/stickers/pop_culture/main-character-clapper.png",
+    "width": 114,
+    "height": 97,
+    "aspectRatio": 1.175
+  },
+  {
+    "id": "apple-music-icon",
+    "name": "Apple Music Note",
+    "category": "music_misc",
+    "tags": [
+      "music",
+      "icon",
+      "apple",
+      "song"
+    ],
+    "url": "/stickers/music_misc/apple-music-icon.png",
+    "width": 104,
+    "height": 104,
+    "aspectRatio": 1
+  },
+  {
+    "id": "ghostface-busters",
+    "name": "Ghostface Scream Busters",
+    "category": "pop_culture",
+    "tags": [
+      "horror",
+      "scream",
+      "ghostbusters",
+      "halloween"
+    ],
+    "url": "/stickers/pop_culture/ghostface-busters.png",
+    "width": 213,
+    "height": 195,
+    "aspectRatio": 1.092
+  },
+  {
+    "id": "one-piece-skull",
+    "name": "Straw Hat Pirate Skull",
+    "category": "pop_culture",
+    "tags": [
+      "anime",
+      "onepiece",
+      "luffy",
+      "pirate"
+    ],
+    "url": "/stickers/pop_culture/one-piece-skull.png",
+    "width": 150,
+    "height": 130,
+    "aspectRatio": 1.154
+  },
+  {
+    "id": "air-jordans",
+    "name": "Nike Air Jordan 1 Chicagos",
+    "category": "streetwear",
+    "tags": [
+      "sneakers",
+      "jordan",
+      "shoes",
+      "hypebeast"
+    ],
+    "url": "/stickers/streetwear/air-jordans.png",
+    "width": 185,
+    "height": 235,
+    "aspectRatio": 0.787
+  },
+  {
+    "id": "yankees-cap",
+    "name": "NY Yankees Fitted Cap",
+    "category": "streetwear",
+    "tags": [
+      "hat",
+      "cap",
+      "newyork",
+      "baseball",
+      "streetwear"
+    ],
+    "url": "/stickers/streetwear/yankees-cap.png",
+    "width": 220,
+    "height": 170,
+    "aspectRatio": 1.294
+  },
+  {
+    "id": "checkered-flags",
+    "name": "Finish Line Checkered Flags",
+    "category": "motorsport",
+    "tags": [
+      "racing",
+      "flags",
+      "finish",
+      "car"
+    ],
+    "url": "/stickers/motorsport/checkered-flags.png",
+    "width": 140,
+    "height": 160,
+    "aspectRatio": 0.875
+  },
+  {
+    "id": "just-do-it",
+    "name": "Nike Just Do It",
+    "category": "streetwear",
+    "tags": [
+      "nike",
+      "slogan",
+      "sport",
+      "quote"
+    ],
+    "url": "/stickers/streetwear/just-do-it.png",
+    "width": 195,
+    "height": 145,
+    "aspectRatio": 1.345
+  },
+  {
+    "id": "vans-logo",
+    "name": "Vans Off The Wall",
+    "category": "streetwear",
+    "tags": [
+      "vans",
+      "skate",
+      "logo",
+      "streetwear"
+    ],
+    "url": "/stickers/streetwear/vans-logo.png",
+    "width": 185,
+    "height": 200,
+    "aspectRatio": 0.925
+  },
+  {
+    "id": "skyline-gtr-r34",
+    "name": "Nissan Skyline GT-R R34",
+    "category": "motorsport",
+    "tags": [
+      "jdm",
+      "skyline",
+      "gtr",
+      "fastandfurious",
+      "car"
+    ],
+    "url": "/stickers/motorsport/skyline-gtr-r34.png",
+    "width": 265,
+    "height": 145,
+    "aspectRatio": 1.828
+  },
+  {
+    "id": "skateboard-checker",
+    "name": "Checkered Skateboard Deck",
+    "category": "streetwear",
+    "tags": [
+      "skateboard",
+      "skate",
+      "deck",
+      "extreme"
+    ],
+    "url": "/stickers/streetwear/skateboard-checker.png",
+    "width": 140,
+    "height": 245,
+    "aspectRatio": 0.571
+  },
+  {
+    "id": "porsche-911-poster",
+    "name": "Porsche 911 Unleash The Legend",
+    "category": "motorsport",
+    "tags": [
+      "porsche",
+      "911",
+      "supercar",
+      "classic"
+    ],
+    "url": "/stickers/motorsport/porsche-911-poster.png",
+    "width": 196,
+    "height": 250,
+    "aspectRatio": 0.784
+  },
+  {
+    "id": "classic-garage-sign",
+    "name": "Classic Garage Muscle Car",
+    "category": "motorsport",
+    "tags": [
+      "garage",
+      "musclecar",
+      "retro",
+      "hotrod"
+    ],
+    "url": "/stickers/motorsport/classic-garage-sign.png",
+    "width": 220,
+    "height": 233,
+    "aspectRatio": 0.944
+  },
+  {
+    "id": "red-dice",
+    "name": "Lucky Red Casino Dice",
+    "category": "music_misc",
+    "tags": [
+      "dice",
+      "casino",
+      "lucky",
+      "red",
+      "game"
+    ],
+    "url": "/stickers/music_misc/red-dice.png",
+    "width": 148,
+    "height": 157,
+    "aspectRatio": 0.943
+  },
+  {
+    "id": "poker-aces",
+    "name": "Bloody Four Aces Poker Hand",
+    "category": "music_misc",
+    "tags": [
+      "cards",
+      "poker",
+      "aces",
+      "gambling"
+    ],
+    "url": "/stickers/music_misc/poker-aces.png",
+    "width": 195,
+    "height": 133,
+    "aspectRatio": 1.466
+  },
+  {
+    "id": "electric-guitar",
+    "name": "Red Electric Guitar",
+    "category": "music_misc",
+    "tags": [
+      "guitar",
+      "rock",
+      "music",
+      "instrument"
+    ],
+    "url": "/stickers/music_misc/electric-guitar.png",
+    "width": 177,
+    "height": 182,
+    "aspectRatio": 0.973
+  },
+  {
+    "id": "vivienne-westwood",
+    "name": "Vivienne Westwood Label",
+    "category": "streetwear",
+    "tags": [
+      "fashion",
+      "designer",
+      "label",
+      "streetwear"
+    ],
+    "url": "/stickers/streetwear/vivienne-westwood.png",
+    "width": 184,
+    "height": 146,
+    "aspectRatio": 1.26
+  },
+  {
+    "id": "marlboro-juice",
+    "name": "Japanese Marlboro Juice Box",
+    "category": "retro",
+    "tags": [
+      "anime",
+      "juice",
+      "retro",
+      "japan",
+      "y2k"
+    ],
+    "url": "/stickers/retro/marlboro-juice.png",
+    "width": 223,
+    "height": 266,
+    "aspectRatio": 0.838
+  },
+  {
+    "id": "spider-emblem",
+    "name": "Spider Hero Back Emblem",
+    "category": "pop_culture",
+    "tags": [
+      "spider",
+      "marvel",
+      "hero",
+      "badge"
+    ],
+    "url": "/stickers/pop_culture/spider-emblem.png",
+    "width": 130,
+    "height": 159,
+    "aspectRatio": 0.818
+  },
+  {
+    "id": "coca-cola-pack",
+    "name": "Coca-Cola 6-Pack Bottles",
+    "category": "retro",
+    "tags": [
+      "coke",
+      "cocacola",
+      "vintage",
+      "soda"
+    ],
+    "url": "/stickers/retro/coca-cola-pack.png",
+    "width": 205,
+    "height": 265,
+    "aspectRatio": 0.774
+  },
+  {
+    "id": "porsche-911-rear",
+    "name": "Porsche 911 Turbo Widebody",
+    "category": "motorsport",
+    "tags": [
+      "porsche",
+      "turbo",
+      "widebody",
+      "car"
+    ],
+    "url": "/stickers/motorsport/porsche-911-rear.png",
+    "width": 215,
+    "height": 130,
+    "aspectRatio": 1.654
+  },
+  {
+    "id": "cat-astronaut",
+    "name": "Space Cat Cosmonaut",
+    "category": "pop_culture",
+    "tags": [
+      "cat",
+      "astronaut",
+      "space",
+      "retro"
+    ],
+    "url": "/stickers/pop_culture/cat-astronaut.png",
+    "width": 213,
+    "height": 251,
+    "aspectRatio": 0.849
+  },
+  {
+    "id": "rolling-stones-tongue",
+    "name": "The Sticky Fingers Tongue Badge",
+    "category": "music_misc",
+    "tags": [
+      "rock",
+      "stones",
+      "tongue",
+      "band"
+    ],
+    "url": "/stickers/music_misc/rolling-stones-tongue.png",
+    "width": 254,
+    "height": 255,
+    "aspectRatio": 0.996
+  },
+  {
+    "id": "skull-star-eyes",
+    "name": "Laughing Skull Star Eyes",
+    "category": "music_misc",
+    "tags": [
+      "skull",
+      "rock",
+      "stars",
+      "tattoo"
+    ],
+    "url": "/stickers/music_misc/skull-star-eyes.png",
+    "width": 212,
+    "height": 269,
+    "aspectRatio": 0.788
+  },
+  {
+    "id": "vintage-1936",
+    "name": "Vintage 1936 All Original Parts",
+    "category": "retro",
+    "tags": [
+      "badge",
+      "vintage",
+      "1936",
+      "heritage"
+    ],
+    "url": "/stickers/retro/vintage-1936.png",
+    "width": 260,
+    "height": 263,
+    "aspectRatio": 0.989
+  },
+  {
+    "id": "cheesecake-sign",
+    "name": "Delicious Cheesecake Tin Sign",
+    "category": "retro",
+    "tags": [
+      "diner",
+      "sign",
+      "cheesecake",
+      "food"
+    ],
+    "url": "/stickers/retro/cheesecake-sign.png",
+    "width": 275,
+    "height": 384,
+    "aspectRatio": 0.716
+  },
+  {
+    "id": "memories-license-plate",
+    "name": "Memories Smile License Plate",
+    "category": "retro",
+    "tags": [
+      "licenseplate",
+      "memories",
+      "smile",
+      "car"
+    ],
+    "url": "/stickers/retro/memories-license-plate.png",
+    "width": 219,
+    "height": 413,
+    "aspectRatio": 0.53
+  }
+]

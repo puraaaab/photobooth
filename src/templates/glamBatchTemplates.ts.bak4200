@@ -1,0 +1,611 @@
+import type { Template } from '@/types'
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  STUDIO EDITORIAL & COQUETTE PHOTO STRIP TEMPLATES
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ *  1. Zebra Chic (4-Shot) - High-contrast black & white animal print
+ *  2. Wild Safari (4-Shot) - Natural tan & golden cheetah/leopard print
+ *  3. Vintage Lace (3-Shot) - Victorian antique charcoal embroidered lace
+ *  4. Pastel Cow Print (4-Shot) - Y2K pink & brown cow spots on cream
+ *  5. Rose Garden (2-Shot) - Romantic red roses & botanical climbing vines
+ *  6. Burgundy Ribbon & Hearts (3-Shot) - Coquette white satin bows & 3D black hearts
+ *  7. Good Things Coming (3-Shot) - Festive holiday cherries, silver baubles & typography
+ *  8. Fallen Angel (4-Shot) - Dark maroon gothic fairy stars & editorial typography
+ *  9. Crimson Kiss (2-Shot) - Noir black with intense red lipstick kiss prints
+ */
+
+// ── 1. ZEBRA CHIC (4-SHOT) ──────────────────────────────────────────────────
+export const zebraStrip4: Template = {
+  id: 'custom-zebra-strip-4',
+  name: 'Zebra Chic (4-Shot)',
+  category: 'custom',
+  supportedPhotoCounts: [4],
+  supportedOrientations: ['vertical'],
+  canvas: {
+    width: 1200,
+    height: 3593,
+  },
+  overlayImageUrl: '/templates/zebra-strip-4-overlay.png',
+  background: {
+    type: 'solid',
+    color: '#0A0A0A',
+  },
+  border: {
+    type: 'none',
+  },
+  spacing: {
+    outerMargin: 162,
+    photoSpacing: 102,
+    padding: 0,
+  },
+  photoSlots: [
+    {
+      id: 'slot-0',
+      x: 162,
+      y: 106,
+      width: 876,
+      height: 722,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-1',
+      x: 162,
+      y: 930,
+      width: 876,
+      height: 771,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-2',
+      x: 162,
+      y: 1804,
+      width: 876,
+      height: 767,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-3',
+      x: 162,
+      y: 2653,
+      width: 876,
+      height: 746,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+  ],
+  textElements: [],
+  decorationElements: [],
+  defaultFilter: 'bnw',
+  metadata: {
+    author: 'Photobooth Studio',
+    version: '1.0',
+    tags: ['zebra', 'monochrome', 'black-and-white', 'animal-print', '4-photo'],
+    description: 'Monochrome high-contrast zebra print border with sleek clean framing for 4 vertical portraits.',
+  },
+}
+
+// ── 2. WILD SAFARI (4-SHOT) ─────────────────────────────────────────────────
+export const leopardSafari4: Template = {
+  id: 'custom-leopard-safari-4',
+  name: 'Wild Safari (4-Shot)',
+  category: 'custom',
+  supportedPhotoCounts: [4],
+  supportedOrientations: ['vertical'],
+  canvas: {
+    width: 1200,
+    height: 3562,
+  },
+  overlayImageUrl: '/templates/leopard-safari-4-overlay.png',
+  background: {
+    type: 'solid',
+    color: '#110D0A',
+  },
+  border: {
+    type: 'none',
+  },
+  spacing: {
+    outerMargin: 171,
+    photoSpacing: 113,
+    padding: 0,
+  },
+  photoSlots: [
+    {
+      id: 'slot-0',
+      x: 171,
+      y: 105,
+      width: 858,
+      height: 736,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-1',
+      x: 171,
+      y: 954,
+      width: 858,
+      height: 733,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-2',
+      x: 171,
+      y: 1792,
+      width: 858,
+      height: 736,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-3',
+      x: 171,
+      y: 2634,
+      width: 858,
+      height: 712,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+  ],
+  textElements: [],
+  decorationElements: [],
+  defaultFilter: 'warm',
+  metadata: {
+    author: 'Photobooth Studio',
+    version: '1.0',
+    tags: ['leopard', 'cheetah', 'safari', 'wild', 'animal-print', 'warm', '4-photo'],
+    description: 'Warm natural tan and gold cheetah/leopard print border with classic photo booth cutouts.',
+  },
+}
+
+// ── 3. VINTAGE LACE (3-SHOT) ────────────────────────────────────────────────
+export const vintageLace3: Template = {
+  id: 'custom-vintage-lace-3',
+  name: 'Vintage Lace (3-Shot)',
+  category: 'custom',
+  supportedPhotoCounts: [3],
+  supportedOrientations: ['vertical'],
+  canvas: {
+    width: 1200,
+    height: 3593,
+  },
+  overlayImageUrl: '/templates/vintage-lace-3-overlay.png',
+  background: {
+    type: 'solid',
+    color: '#0C0C0D',
+  },
+  border: {
+    type: 'none',
+  },
+  spacing: {
+    outerMargin: 236,
+    photoSpacing: 113,
+    padding: 0,
+  },
+  photoSlots: [
+    {
+      id: 'slot-0',
+      x: 236,
+      y: 260,
+      width: 729,
+      height: 908,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-1',
+      x: 239,
+      y: 1281,
+      width: 725,
+      height: 939,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-2',
+      x: 239,
+      y: 2327,
+      width: 725,
+      height: 936,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+  ],
+  textElements: [],
+  decorationElements: [],
+  defaultFilter: 'warm',
+  metadata: {
+    author: 'Photobooth Studio',
+    version: '1.0',
+    tags: ['vintage', 'lace', 'victorian', 'antique', 'embroidery', 'gothic', '3-photo'],
+    description: 'Intricate Victorian antique charcoal lace with delicate embroidered filigree and scalloped borders.',
+  },
+}
+
+// ── 4. PASTEL COW PRINT (4-SHOT) ───────────────────────────────────────────
+export const pinkCow4: Template = {
+  id: 'custom-pink-cow-4',
+  name: 'Pastel Cow Print (4-Shot)',
+  category: 'custom',
+  supportedPhotoCounts: [4],
+  supportedOrientations: ['vertical'],
+  canvas: {
+    width: 1200,
+    height: 3562,
+  },
+  overlayImageUrl: '/templates/pink-cow-4-overlay.png',
+  background: {
+    type: 'solid',
+    color: '#FDF9F5',
+  },
+  border: {
+    type: 'none',
+  },
+  spacing: {
+    outerMargin: 174,
+    photoSpacing: 113,
+    padding: 0,
+  },
+  photoSlots: [
+    {
+      id: 'slot-0',
+      x: 174,
+      y: 94,
+      width: 848,
+      height: 729,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-1',
+      x: 174,
+      y: 936,
+      width: 848,
+      height: 747,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-2',
+      x: 174,
+      y: 1788,
+      width: 848,
+      height: 709,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-3',
+      x: 174,
+      y: 2599,
+      width: 848,
+      height: 726,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+  ],
+  textElements: [],
+  decorationElements: [],
+  defaultFilter: 'warm',
+  metadata: {
+    author: 'Photobooth Studio',
+    version: '1.0',
+    tags: ['cow-print', 'pink', 'pastel', 'y2k', 'cute', 'aesthetic', '4-photo'],
+    description: 'Playful Y2K pastel pink and chocolate brown cow pattern on a warm cream aesthetic strip.',
+  },
+}
+
+// ── 5. ROSE GARDEN (2-SHOT) ─────────────────────────────────────────────────
+export const roseGarden2: Template = {
+  id: 'custom-rose-garden-2',
+  name: 'Rose Garden (2-Shot)',
+  category: 'custom',
+  supportedPhotoCounts: [2],
+  supportedOrientations: ['vertical'],
+  canvas: {
+    width: 1200,
+    height: 3471,
+  },
+  overlayImageUrl: '/templates/rose-garden-2-overlay.png',
+  background: {
+    type: 'solid',
+    color: '#0A0808',
+  },
+  border: {
+    type: 'none',
+  },
+  spacing: {
+    outerMargin: 143,
+    photoSpacing: 258,
+    padding: 0,
+  },
+  photoSlots: [
+    {
+      id: 'slot-0',
+      x: 143,
+      y: 689,
+      width: 901,
+      height: 867,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-1',
+      x: 150,
+      y: 1814,
+      width: 901,
+      height: 864,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+  ],
+  textElements: [],
+  decorationElements: [],
+  defaultFilter: 'warm',
+  metadata: {
+    author: 'Photobooth Studio',
+    version: '1.0',
+    tags: ['roses', 'floral', 'botanical', 'romantic', 'love', 'garden', '2-photo'],
+    description: 'Romantic deep red garden roses, climbing botanical vines, and ornate scalloped framing for 2 portraits.',
+  },
+}
+
+// ── 6. BURGUNDY RIBBON & HEARTS (3-SHOT) ───────────────────────────────────
+export const burgundyRibbon3: Template = {
+  id: 'custom-burgundy-ribbon-3',
+  name: 'Burgundy Ribbon & Hearts (3-Shot)',
+  category: 'custom',
+  supportedPhotoCounts: [3],
+  supportedOrientations: ['vertical'],
+  canvas: {
+    width: 1200,
+    height: 3593,
+  },
+  overlayImageUrl: '/templates/burgundy-ribbon-3-overlay.png',
+  background: {
+    type: 'solid',
+    color: '#2C090D',
+  },
+  border: {
+    type: 'none',
+  },
+  spacing: {
+    outerMargin: 130,
+    photoSpacing: 138,
+    padding: 0,
+  },
+  photoSlots: [
+    {
+      id: 'slot-0',
+      x: 130,
+      y: 109,
+      width: 936,
+      height: 778,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-1',
+      x: 130,
+      y: 1025,
+      width: 936,
+      height: 792,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-2',
+      x: 130,
+      y: 1937,
+      width: 936,
+      height: 750,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+  ],
+  textElements: [],
+  decorationElements: [],
+  defaultFilter: 'warm',
+  metadata: {
+    author: 'Photobooth Studio',
+    version: '1.0',
+    tags: ['burgundy', 'ribbon', 'bow', 'coquette', 'hearts', 'chic', '3-photo'],
+    description: 'Rich velvet burgundy strip styled with delicate white satin ribbon bows and glossy 3D black hearts.',
+  },
+}
+
+// ── 7. GOOD THINGS COMING (3-SHOT) ──────────────────────────────────────────
+export const holidayCherries3: Template = {
+  id: 'custom-holiday-cherries-3',
+  name: 'Good Things Coming (3-Shot)',
+  category: 'custom',
+  supportedPhotoCounts: [3],
+  supportedOrientations: ['vertical'],
+  canvas: {
+    width: 1200,
+    height: 3583,
+  },
+  overlayImageUrl: '/templates/holiday-cherries-3-overlay.png',
+  background: {
+    type: 'solid',
+    color: '#28070B',
+  },
+  border: {
+    type: 'none',
+  },
+  spacing: {
+    outerMargin: 154,
+    photoSpacing: 135,
+    padding: 0,
+  },
+  photoSlots: [
+    {
+      id: 'slot-0',
+      x: 154,
+      y: 147,
+      width: 891,
+      height: 702,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-1',
+      x: 154,
+      y: 984,
+      width: 891,
+      height: 699,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-2',
+      x: 154,
+      y: 1823,
+      width: 891,
+      height: 709,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+  ],
+  textElements: [],
+  decorationElements: [],
+  defaultFilter: 'warm',
+  metadata: {
+    author: 'Photobooth Studio',
+    version: '1.0',
+    tags: ['holiday', 'cherries', 'festive', 'winter', 'sparkle', 'wine', '3-photo'],
+    description: 'Deep wine festive strip featuring glossy cherry ornaments, sparkling silver baubles, and inspiring typography.',
+  },
+}
+
+// ── 8. FALLEN ANGEL (4-SHOT) ────────────────────────────────────────────────
+export const fallenAngel4: Template = {
+  id: 'custom-fallen-angel-4',
+  name: 'Fallen Angel (4-Shot)',
+  category: 'custom',
+  supportedPhotoCounts: [4],
+  supportedOrientations: ['vertical'],
+  canvas: {
+    width: 1200,
+    height: 3551,
+  },
+  overlayImageUrl: '/templates/fallen-angel-4-overlay.png',
+  background: {
+    type: 'solid',
+    color: '#2A080B',
+  },
+  border: {
+    type: 'none',
+  },
+  spacing: {
+    outerMargin: 115,
+    photoSpacing: 98,
+    padding: 0,
+  },
+  photoSlots: [
+    {
+      id: 'slot-0',
+      x: 115,
+      y: 132,
+      width: 974,
+      height: 634,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-1',
+      x: 115,
+      y: 864,
+      width: 974,
+      height: 637,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-2',
+      x: 115,
+      y: 1599,
+      width: 974,
+      height: 630,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-3',
+      x: 115,
+      y: 2317,
+      width: 974,
+      height: 599,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+  ],
+  textElements: [],
+  decorationElements: [],
+  defaultFilter: 'warm',
+  metadata: {
+    author: 'Photobooth Studio',
+    version: '1.0',
+    tags: ['angel', 'gothic', 'stars', 'grunge', 'burgundy', 'maroon', 'editorial', '4-photo'],
+    description: 'Editorial deep maroon strip with grunge fairy stars and "An angel has fallen" poetic gothic typography.',
+  },
+}
+
+// ── 9. CRIMSON KISS (2-SHOT) ────────────────────────────────────────────────
+export const crimsonKiss2: Template = {
+  id: 'custom-crimson-kiss-2',
+  name: 'Crimson Kiss (2-Shot)',
+  category: 'custom',
+  supportedPhotoCounts: [2],
+  supportedOrientations: ['vertical'],
+  canvas: {
+    width: 1200,
+    height: 3481,
+  },
+  overlayImageUrl: '/templates/crimson-kiss-2-overlay.png',
+  background: {
+    type: 'solid',
+    color: '#000000',
+  },
+  border: {
+    type: 'none',
+  },
+  spacing: {
+    outerMargin: 155,
+    photoSpacing: 136,
+    padding: 0,
+  },
+  photoSlots: [
+    {
+      id: 'slot-0',
+      x: 155,
+      y: 363,
+      width: 891,
+      height: 1218,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+    {
+      id: 'slot-1',
+      x: 155,
+      y: 1717,
+      width: 891,
+      height: 1230,
+      shape: 'rectangle',
+      cornerRadius: 0,
+    },
+  ],
+  textElements: [],
+  decorationElements: [],
+  defaultFilter: 'warm',
+  metadata: {
+    author: 'Photobooth Studio',
+    version: '1.0',
+    tags: ['kiss', 'lips', 'red', 'crimson', 'glam', 'editorial', 'noir', '2-photo'],
+    description: 'Edgy noir photo strip featuring high-contrast crimson lipstick kiss prints, crisp white photo borders, and rich black canvas.',
+  },
+}

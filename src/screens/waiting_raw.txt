@@ -1,0 +1,108 @@
+Created At: 2026-09-29T12:28:56+05:30
+Completed At: 2026-09-29T12:28:57+05:30
+File Path: `file:///c:/projects/Photobooth/src/screens/WaitingScreen.tsx`
+Total Lines: 895
+Total Bytes: 31516
+Showing lines 1 to 100
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: import React, { useState, useEffect, useCallback } from 'react'
+2: import { motion, AnimatePresence } from 'framer-motion'
+3: import { Sparkles, Copy, Check, ShieldCheck, ArrowRight, Video, Cpu, Ticket as TicketIcon, CheckCircle2, AlertCircle, Delete, KeyRound } from 'lucide-react'
+4: import { useSessionStore } from '@/store/sessionStore'
+5: import { useConnectionStore } from '@/store/connectionStore'
+6: import { useSettingsStore } from '@/store/settingsStore'
+7: import { useQueueStore } from '@/store/queueStore'
+8: import { unlockAudioContext } from '@/utils/audio'
+9: import type { Ticket } from '@/types'
+10: 
+11: interface WaitingScreenProps {
+12:   onStartCapture: () => void
+13:   onPhotosReady: () => void
+14:   onDemoMode: () => void
+15:   onOpenAdmin?: () => void
+16:   onOpenQueueManager?: () => void
+17: }
+18: 
+19: 
+20: 
+21: 
+22: export function WaitingScreen({
+23:   onStartCapture,
+24:   onPhotosReady,
+25:   onDemoMode,
+26:   onOpenAdmin,
+27:   onOpenQueueManager,
+28: }: WaitingScreenProps) {
+29:   const { session, createSession, addPhoto, loadSession } = useSessionStore()
+30:   const { pi, server } = useConnectionStore()
+31:   const { settings } = useSettingsStore()
+32: 
+33:   const [sessionInfo, setSessionInfo] = useState<{ id: string; token: string; address: string } | null>(null)
+34:   const [copied, setCopied] = useState(false)
+35:   const [demoRunning, setDemoRunning] = useState(false)
+36:   const [demoProgress, setDemoProgress] = useState(0)
+37:   const [consentAccepted, setConsentAccepted] = useState(false)
+38:   const [consentError, setConsentError] = useState(false)
+39: 
+40:   // ─── Ticket & Digital Queue State ──────────────────────────────────────────
+41:   const [ticketCode, setTicketCode] = useState('')
+42:   const [claimedTicket, setClaimedTicket] = useState<Ticket | null>(null)
+43:   const [ticketError, setTicketError] = useState<string | null>(null)
+44:   const [isVerifying, setIsVerifying] = useState(false)
+45: 
+46:   const isQueueMode = settings.kiosk.queueModeEnabled !== false
+47: 
+48:   const photoCount = session?.photos.length ?? 0
+49:   const isConsentRequired = !!settings.kiosk.privacyConsentEnabled
+50: 
+51:   // Initialize session
+52:   const initSession = useCallback(async () => {
+53:     if (session) {
+54:       setSessionInfo({ id: session.id, token: '', address: server.address || 'localhost' })
+55:       return
+56:     }
+57:     try {
+58:       const { sessionId, sessionToken } = await createSession()
+59:       const address = window.electronAPI?.server
+60:         ? await window.electronAPI.server.getAddress()
+61:         : 'localhost'
+62:       setSessionInfo({ id: sessionId, token: sessionToken, address })
+63:     } catch (err) {
+64:       console.error('[Waiting] Failed to create session:', err)
+65:     }
+66:   }, [session, createSession, server.address])
+67: 
+68:   useEffect(() => {
+69:     initSession()
+70:   }, [])
+71: 
+72:   // ─── Ticket Verification & Claim ───────────────────────────────────────────
+73:   const verifyTicketCode = useCallback(async (codeToVerify?: string) => {
+74:     const code = (codeToVerify || ticketCode).trim()
+75:     if (code.length < 4) {
+76:       setTicketError('Please enter a 4-digit ticket code.')
+77:       return
+78:     }
+79: 
+80:     setIsVerifying(true)
+81:     setTicketError(null)
+82: 
+83:     // Ensure session exists
+84:     let curSession = useSessionStore.getState().session
+85:     if (!curSession) {
+86:       const { sessionId } = await createSession()
+87:       await loadSession(sessionId)
+88:       curSession = useSessionStore.getState().session
+89:     }
+90: 
+91:     const res = await useQueueStore.getState().claimTicket(code, curSession?.id)
+92:     setIsVerifying(false)
+93: 
+94:     if (res.success && res.ticket) {
+95:       setClaimedTicket(res.ticket)
+96:       if (curSession) {
+97:         useSessionStore.setState({
+98:           session: {
+99:             ...curSession,
+100:             ticketId: res.ticket.id,
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.

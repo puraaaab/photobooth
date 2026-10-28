@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PAPIT Photobooth Studio | Instant Photo Strips & Event Kiosk</title>
+  <meta name="description"
+    content="PAPIT Photobooth Studio delivers studio-grade instant physical photo prints and digital downloads for weddings, college events, corporate parties, and celebrations.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --brand: #6D0626;
+      --brand-hover: #8A0830;
+      --brand-light: #FBF4F6;
+      --accent: #E52E5E;
+      --dark: #1A0D11;
+      --text: #2D2528;
+      --text-muted: #6B6165;
+      --bg: #FAFAF9;
+      --card-bg: #FFFFFF;
+      --border: #EFE8EA;
+      --radius: 14px;
+      --shadow: 0 10px 30px -10px rgba(109, 6, 38, 0.08);
+      --shadow-lg: 0 20px 40px -15px rgba(109, 6, 38, 0.15);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* Navigation */
+    header {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+    }
+
+    .brand-logo {
+      width: 42px;
+      height: 42px;
+      background: linear-gradient(135deg, var(--brand), var(--accent));
+      color: white;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 20px;
+      font-family: 'Space Grotesk', sans-serif;
+      box-shadow: 0 4px 12px rgba(109, 6, 38, 0.25);
+    }
+
+    .brand-name {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--dark);
+      letter-spacing: -0.5px;
+    }
+
+    .brand-name span {
+      color: var(--brand);
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 24px;
+      list-style: none;
+      align-items: center;
+    }
+
+    .nav-links a {
+      text-decoration: none;
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 14px;
+      transition: color 0.2s;
+    }
+
+    .nav-links a:hover {
+      color: var(--brand);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 20px;
+      border-radius: 100px;
+      font-weight: 700;
+      font-size: 14px;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      cursor: pointer;
+      border: none;
+    }
+
+    .btn-primary {
+      background: var(--brand);
+      color: white;
+      box-shadow: 0 4px 14px rgba(109, 6, 38, 0.25);
+    }
+
+    .btn-primary:hover {
+      background: var(--brand-hover);
+      transform: translateY(-1px);
+    }
+
+    /* Hero Section */
+    .hero {
+      padding: 80px 24px 60px;
+      max-width: 1200px;
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      background: var(--brand-light);
+      border: 1px solid rgba(109, 6, 38, 0.15);
+      border-radius: 100px;
+      color: var(--brand);
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 24px;
+    }
+
+    .hero h1 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 52px;
+      font-weight: 700;
+      color: var(--dark);
+      line-height: 1.15;
+      letter-spacing: -1.5px;
+      margin-bottom: 20px;
+      max-width: 850px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .hero h1 span {
+      background: linear-gradient(135deg, var(--brand), var(--accent));
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero p {
+      font-size: 18px;
+      color: var(--text-muted);
+      max-width: 650px;
+      margin: 0 auto 36px;
+    }
+
+    .hero-cta {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    /* Pricing Section */
+    .section {
+      padding: 70px 24px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .section-header {
+      text-align: center;
+      margin-bottom: 50px;
+    }
+
+    .section-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 34px;
+      font-weight: 700;
+      color: var(--dark);
+      letter-spacing: -0.5px;
+      margin-bottom: 10px;
+    }
+
+    .section-subtitle {
+      font-size: 16px;
+      color: var(--text-muted);
+      max-width: 550px;
+      margin: 0 auto;
+    }
+
+    .pricing-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 24px;
+      margin-bottom: 40px;
+    }
+
+    .price-card {
+      background: var(--card-bg);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px 28px;
+      position: relative;
+      transition: transform 0.2s, box-shadow 0.2s;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .price-card:hover {
+      transform: translateY(-4px);
+      box-shadow: var(--shadow-lg);
+    }
+
+    .price-card.featured {
+      border-color: var(--brand);
+      background: #FFFFFF;
+      box-shadow: 0 16px 36px -10px rgba(109, 6, 38, 0.2);
+    }
+
+    .featured-tag {
+      position: absolute;
+      top: -12px;
+      right: 24px;
+      background: var(--brand);
+      color: white;
+      padding: 4px 12px;
+      border-radius: 100px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .price-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--dark);
+      margin-bottom: 8px;
+    }
+
+    .price-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 20px;
+      min-height: 38px;
+    }
+
+    .price-val {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 44px;
+      font-weight: 700;
+      color: var(--brand);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: baseline;
+      gap: 4px;
+    }
+
+    .price-val span {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-muted);
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+
+    .price-features {
+      list-style: none;
+      margin-bottom: 28px;
+      flex-grow: 1;
+    }
+
+    .price-features li {
+      font-size: 13.5px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text);
+    }
+
+    .price-features li::before {
+      content: "✓";
+      color: #16a34a;
+      font-weight: 800;
+      font-size: 14px;
+    }
+
+    /* Policies & Compliance Cards */
+    .policy-container {
+      background: var(--card-bg);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      padding: 36px 32px;
+      margin-bottom: 30px;
+      box-shadow: var(--shadow);
+    }
+
+    .policy-header {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--brand);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .policy-content p {
+      font-size: 14px;
+      color: var(--text);
+      line-height: 1.7;
+      margin-bottom: 12px;
+    }
+
+    .policy-content ul {
+      margin-left: 20px;
+      margin-bottom: 14px;
+    }
+
+    .policy-content li {
+      font-size: 14px;
+      line-height: 1.7;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+
+    /* Contact Details Grid */
+    .contact-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 20px;
+      margin-top: 20px;
+    }
+
+    .contact-box {
+      background: var(--brand-light);
+      border: 1px solid rgba(109, 6, 38, 0.12);
+      border-radius: 10px;
+      padding: 20px;
+    }
+
+    .contact-box h4 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      font-weight: 700;
+    }
+
+    .contact-box p {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--dark);
+      margin: 0;
+    }
+
+    /* Footer */
+    footer {
+      background: var(--dark);
+      color: #D1C5C9;
+      padding: 50px 24px 30px;
+      margin-top: 60px;
+    }
+
+    .footer-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 24px;
+      padding-bottom: 30px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .footer-brand h3 {
+      font-family: 'Space Grotesk', sans-serif;
+      color: white;
+      font-size: 20px;
+      margin-bottom: 6px;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .footer-links a {
+      color: #D1C5C9;
+      text-decoration: none;
+      font-size: 13px;
+      transition: color 0.2s;
+    }
+
+    .footer-links a:hover {
+      color: white;
+    }
+
+    .footer-bottom {
+      max-width: 1200px;
+      margin: 24px auto 0;
+      text-align: center;
+      font-size: 12px;
+      color: #8C7B81;
+    }
+
+    @media (max-width: 768px) {
+      .hero h1 {
+        font-size: 36px;
+      }
+
+      .nav-links {
+        display: none;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Navigation -->
+  <header>
+    <div class="nav-container">
+      <a href="#" class="brand">
+        <div class="brand-logo">P</div>
+        <div class="brand-name">PAPIT <span>Photobooth</span></div>
+      </a>
+      <ul class="nav-links">
+        <li><a href="#pricing">Pricing & Plans</a></li>
+        <li><a href="#about">About Us</a></li>
+        <li><a href="#contact">Contact</a></li>
+        <li><a href="#refund">Refund Policy</a></li>
+        <li><a href="#terms">Terms</a></li>
+        <li><a href="#privacy">Privacy</a></li>
+      </ul>
+      <a href="#contact" class="btn btn-primary">Book Event Kiosk</a>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero">
+    <div class="badge">📸 Live Instant Printing Experience</div>
+    <h1>Studio-Quality Photobooth Moments. <span>Printed Instantly.</span></h1>
+    <p>PAPIT Photobooth Studio delivers real-time photo strips, custom overlays, and instant QR digital downloads for
+      weddings, college fests, popups, and celebrations across India.</p>
+    <div class="hero-cta">
+      <a href="#pricing" class="btn btn-primary">Explore Print Packages</a>
+      <a href="#contact" class="btn"
+        style="background: #FFFFFF; border: 1.5px solid var(--border); color: var(--text);">Contact Support</a>
+    </div>
+  </section>
+
+  <!-- Pricing Table (Essential for Razorpay) -->
+  <section id="pricing" class="section">
+    <div class="section-header">
+      <h2 class="section-title">Transparent Print Plans</h2>
+      <p class="section-subtitle">Choose your preferred photo strip layout. All prints are lab-processed and laminated
+        on-site.</p>
+    </div>
+
+    <div class="pricing-grid">
+      <!-- Plan 1 -->
+      <div class="price-card">
+        <div class="price-title">Duo Strips Plan</div>
+        <div class="price-desc">Perfect for couples and quick memories. 2 duplicate photo strips printed live.</div>
+        <div class="price-val">₹99 <span>/ session</span></div>
+        <ul class="price-features">
+          <li>2 Physical Photo Strips</li>
+          <li>Printed on A5 Photo Media</li>
+          <li>Instant High-Res Print</li>
+          <li>Digital QR Code Download</li>
+          <li>On-site instant delivery</li>
+        </ul>
+        <a href="#contact" class="btn btn-primary" style="width: 100%;">Select Plan</a>
+      </div>
+
+      <!-- Plan 2 -->
+      <div class="price-card featured">
+        <div class="featured-tag">Most Popular</div>
+        <div class="price-title">Trio Strips Plan</div>
+        <div class="price-desc">Great for small friend groups. 3 high-resolution photo strips printed side-by-side.
+        </div>
+        <div class="price-val">₹149 <span>/ session</span></div>
+        <ul class="price-features">
+          <li>3 Physical Photo Strips</li>
+          <li>Printed on A4 (5-up) Media</li>
+          <li>Instant Laboratory Quality Print</li>
+          <li>Full HD QR Code Downloads</li>
+          <li>Custom Frame Overlays</li>
+          <li>On-site instant delivery</li>
+        </ul>
+        <a href="#contact" class="btn btn-primary" style="width: 100%;">Select Plan</a>
+      </div>
+
+      <!-- Plan 3 -->
+      <div class="price-card">
+        <div class="price-title">Quint Strips (Max Value)</div>
+        <div class="price-desc">Best for full squads and families. 5 full photo strips for everyone to take home.</div>
+        <div class="price-val">₹179 <span>/ session</span></div>
+        <ul class="price-features">
+          <li>5 Physical Photo Strips</li>
+          <li>Full A4 Sheet 5-Strip Spread</li>
+          <li>Instant High-Gloss Physical Print</li>
+          <li>Instant Digital Video/GIF Access</li>
+          <li>Priority Print Processing</li>
+          <li>On-site instant delivery</li>
+        </ul>
+        <a href="#contact" class="btn btn-primary" style="width: 100%;">Select Plan</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- About Us Section -->
+  <section id="about" class="section" style="padding-top: 0;">
+    <div class="policy-container">
+      <div class="policy-header">🏢 About PAPIT Photobooth Studio</div>
+      <div class="policy-content">
+        <p><strong>PAPIT Photobooth Studio</strong> (Operated by Purab Sohil Tailor) is an innovative digital imaging
+          and instant kiosk platform. We operate high-speed automated photo kiosks for private events, university
+          festivals, commercial pop-ups, and corporate brand activations.</p>
+        <p>Equipped with studio lighting, professional cameras, and high-speed dye-sublimation/inkjet lab printers, our
+          interactive kiosks allow guests to capture memorable multi-frame photos, customize aesthetic filters and text,
+          and receive physical print strips within seconds.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Contact Us Section (Mandatory for Razorpay Compliance) -->
+  <section id="contact" class="section" style="padding-top: 0;">
+    <div class="policy-container">
+      <div class="policy-header">📞 Contact Us &amp; Merchant Details</div>
+      <div class="policy-content">
+        <p>If you have any questions about our services, pending payments, or kiosk booking inquiries, reach out to our
+          team:</p>
+
+        <div class="contact-grid">
+          <div class="contact-box">
+            <h4>Merchant / Operating Entity</h4>
+            <p>Purab Sohil Tailor</p>
+            <span style="font-size: 13px; color: var(--text-muted);">Trade Name: PAPIT Photobooth Studio</span>
+          </div>
+
+          <div class="contact-box">
+            <h4>Customer Support Phone</h4>
+            <p>+91 9313780044</p>
+            <span style="font-size: 13px; color: var(--text-muted);">Available: 10:00 AM – 10:00 PM IST</span>
+          </div>
+
+          <div class="contact-box">
+            <h4>Official Contact Email</h4>
+            <p>purabtailor37@gmail.com</p>
+            <span style="font-size: 13px; color: var(--text-muted);">Response within 24 business hours</span>
+          </div>
+
+          <div class="contact-box">
+            <h4>Operating Region</h4>
+            <p>Gujarat, India</p>
+            <span style="font-size: 13px; color: var(--text-muted);">Serving events nationwide</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Refund & Cancellation Policy (Mandatory for Razorpay Compliance) -->
+  <section id="refund" class="section" style="padding-top: 0;">
+    <div class="policy-container">
+      <div class="policy-header">🔄 Cancellation &amp; Refund Policy</div>
+      <div class="policy-content">
+        <p>At PAPIT Photobooth Studio, we strive for 100% satisfaction with every physical print and digital session.
+        </p>
+        <ul>
+          <li><strong>On-Site Physical Prints:</strong> Because prints are customized and generated instantly at the
+            event kiosk, completed physical prints are generally non-refundable once printing has commenced.</li>
+          <li><strong>Technical Glitches / Hardware Failure:</strong> If a payment is successfully deducted but the
+            kiosk fails to print your photo strips due to a paper jam, printer hardware error, or system outage, our
+            operator will either reprint your order immediately or initiate a <strong>100% refund</strong>.</li>
+          <li><strong>Refund Turnaround Time:</strong> If an automated or online payment error occurs, the refund is
+            initiated within <strong>24 to 48 hours</strong>. The refunded amount will be credited back to the
+            customer's original payment method (Bank Account, UPI, or Card) within <strong>5 to 7 business days</strong>
+            as per banking and Razorpay payment gateway timelines.</li>
+          <li><strong>Event Booking Cancellations:</strong> Private event kiosk bookings cancelled more than 7 days
+            prior to the event date are eligible for a 75% refund of the advance deposit. Cancellations within 48 hours
+            of the event are non-refundable.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Shipping & Delivery Policy (Mandatory for Razorpay Compliance) -->
+  <section id="shipping" class="section" style="padding-top: 0;">
+    <div class="policy-container">
+      <div class="policy-header">📦 Shipping &amp; Delivery Policy</div>
+      <div class="policy-content">
+        <p>PAPIT Photobooth Studio provides <strong>on-site physical print services and immediate digital
+            delivery</strong>:</p>
+        <ul>
+          <li><strong>Physical Prints Delivery:</strong> All physical photo strips (A5 or A4 cuts) are printed and
+            handed over to the customer <strong>instantly in-person</strong> at the photobooth counter immediately
+            following photo capture (typically within 45–90 seconds). No postal shipment is required for on-site kiosk
+            sessions.</li>
+          <li><strong>Digital Files Delivery:</strong> Digital soft copies of the captured photos and strips are made
+            available instantly on the kiosk screen via a dynamic QR code for immediate smartphone download.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Terms & Conditions (Mandatory for Razorpay Compliance) -->
+  <section id="terms" class="section" style="padding-top: 0;">
+    <div class="policy-container">
+      <div class="policy-header">📜 Terms &amp; Conditions</div>
+      <div class="policy-content">
+        <p>Welcome to PAPIT Photobooth Studio. By accessing our services, kiosk software, or initiating payment, you
+          agree to comply with and be bound by these Terms &amp; Conditions.</p>
+        <ul>
+          <li><strong>Permitted Use:</strong> Guests using the photobooth must exercise reasonable care when interacting
+            with touchscreen hardware and photography props.</li>
+          <li><strong>Appropriate Content:</strong> We reserve the right to decline processing or printing of content
+            that is unlawful, abusive, defamatory, or violates any third-party rights.</li>
+          <li><strong>Pricing &amp; Taxes:</strong> All prices displayed on our kiosk and website are in Indian Rupees
+            (INR) and inclusive of all applicable statutory taxes.</li>
+          <li><strong>Payment Processing:</strong> Online payments are processed securely via RBI-authorized payment
+            aggregators (Razorpay). We do not store sensitive credit/debit card credentials on our servers.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Privacy Policy (Mandatory for Razorpay Compliance) -->
+  <section id="privacy" class="section" style="padding-top: 0;">
+    <div class="policy-container">
+      <div class="policy-header">🔒 Privacy Policy</div>
+      <div class="policy-content">
+        <p>Your privacy is of utmost importance to us at PAPIT Photobooth Studio:</p>
+        <ul>
+          <li><strong>Captured Photos:</strong> Photos captured during booth sessions are processed solely for the
+            purpose of generating your customized print strips and facilitating your optional QR/cloud download. We
+            never sell, lease, or distribute your private event photos to third-party advertisers.</li>
+          <li><strong>Personal Information:</strong> If you voluntarily supply a mobile phone number or email address
+            for queue SMS notifications or photo delivery, it is used strictly for that transactional delivery and not
+            shared.</li>
+          <li><strong>Payment Security:</strong> All digital transactions occur over encrypted TLS connections via
+            Razorpay. Sensitive card/banking credentials remain encrypted under PCI-DSS Level 1 compliant
+            infrastructure.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="footer-container">
+      <div class="footer-brand">
+        <h3>PAPIT Photobooth Studio</h3>
+        <p style="font-size: 13px;">Making memories tangible with live studio-grade photo strips.</p>
+      </div>
+      <div class="footer-links">
+        <a href="#pricing">Pricing</a>
+        <a href="#about">About</a>
+        <a href="#contact">Contact</a>
+        <a href="#refund">Refund Policy</a>
+        <a href="#shipping">Delivery Policy</a>
+        <a href="#terms">Terms of Service</a>
+        <a href="#privacy">Privacy Policy</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      &copy; 2026 PAPIT Photobooth Studio (Purab Sohil Tailor). All rights reserved. Secure Payments by Razorpay.
+    </div>
+  </footer>
+
+</body>
+
+</html>
