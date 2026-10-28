@@ -92,7 +92,10 @@ find_server() {
 }
 
 start_browser() {
-    pkill -f "$BROWSER_BIN.*--kiosk" 2>/dev/null
+    # Match on our own URL: /usr/bin/chromium-browser is only a wrapper, the real process runs from
+    # /usr/lib/chromium*/, so matching the wrapper path never found it (and spawned a new window every 20 s)
+    pkill -f "view=booth&cam=local" 2>/dev/null
+    sleep 1
     # cam=local: the booth page uses this Pi's own camera at localhost:8080
     $BROWSER_BIN --kiosk --noerrdialogs --disable-infobars --touch-events=enabled --disable-pinch         --overscroll-history-navigation=0 --disable-translate --check-for-update-interval=31536000         --disable-session-crashed-bubble --disable-features=Translate         "http://${SERVER}/?view=booth&cam=local" &
 }
@@ -107,7 +110,7 @@ while true; do
     sleep 20
     if curl -fs -m 3 "http://${SERVER}/api/health" >/dev/null; then
         misses=0
-        pgrep -f "$BROWSER_BIN.*--kiosk" >/dev/null || start_browser
+        pgrep -f "view=booth&cam=local" >/dev/null || start_browser
     else
         misses=$((misses + 1))
         if [ $misses -ge 3 ]; then
