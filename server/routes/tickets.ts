@@ -1,14 +1,16 @@
 import { Router, Request, Response } from 'express'
 import { getTicketManager, getVaultManager, getDataPath, io } from '../index'
 import type { TicketStatus } from '../ticketManager'
-import { exec } from 'child_process'
+import { spawn } from 'child_process'
+import { requireStaff, isStaff, cleanTicketCode } from '../security'
+import { isValidPlan, PLAN_PRICES, DEFAULT_PLAN } from '../../src/constants/pricing'
 import * as path from 'path'
 import * as fs from 'fs'
 
 export const ticketRouter = Router()
 
 // ─── GET /api/tickets ────────────────────────────────────────────────────────
-ticketRouter.get('/', (_req: Request, res: Response) => {
+ticketRouter.get('/', (req: Request, res: Response) => {
   const manager = getTicketManager()
   if (!manager) {
     return res.status(503).json({ error: 'Ticket manager not ready' })
@@ -21,12 +23,13 @@ ticketRouter.get('/', (_req: Request, res: Response) => {
     activeCount: tickets.filter(t => t.status === 'WAITING' || t.status === 'IN_BOOTH' || t.status === 'EDITING').length,
     waitingCount: tickets.filter(t => t.status === 'WAITING').length,
     completedCount: tickets.filter(t => t.status === 'COMPLETED').length,
-    financialSummary: manager.getFinancialSummary(),
+    // Revenue figures are for the ticket desk only, not guest-facing stations
+    financialSummary: isStaff(req) ? manager.getFinancialSummary() : undefined,
   })
 })
 
 // ─── GET /api/tickets/financial ──────────────────────────────────────────────
-ticketRouter.get('/financial', (_req: Request, res: Response) => {
+ticketRouter.get('/financial', requireStaff, (_req: Request, res: Response) => {
   const manager = getTicketManager()
   if (!manager) {
     return res.status(503).json({ error: 'Ticket manager not ready' })
@@ -59,16 +62,21 @@ ticketRouter.get('/:code', (req: Request, res: Response) => {
   }
 
   const vault = getVaultManager()
-  const vaultInfo = vault ? vault.getVaultInfo(ticket.code) : null
+  let vaultInfo = null
+  try {
+    vaultInfo = vault && isStaff(req) ? vault.getVaultInfo(ticket.code) : null
+  } catch {}
 
   res.json({ ticket, vault: vaultInfo })
 })
 
 // ─── GET /api/tickets/:code/vault ────────────────────────────────────────────
 // Inspect customer's photo folder on disk
-ticketRouter.get('/:code/vault', (req: Request, res: Response) => {
-  const rawCode = req.params.code as string
-  const cleanCode = rawCode.replace(/^#/, '').trim()
+ticketRouter.get('/:code/vault', requireStaff, (req: Request, res: Response) => {
+  const cleanCode = cleanTicketCode(req.params.code)
+  if (!cleanCode) {
+    return res.status(400).json({ error: 'Ticket code must be exactly 4 digits' })
+  }
   const vault = getVaultManager()
 
   if (!vault) {
@@ -97,31 +105,32 @@ ticketRouter.get('/:code/vault', (req: Request, res: Response) => {
 
 // ─── POST /api/tickets/:code/open-folder ──────────────────────────────────────
 // Opens the ticket media folder in OS File Explorer (Windows)
-ticketRouter.post('/:code/open-folder', (req: Request, res: Response) => {
-  const rawCode = req.params.code as string
-  const cleanCode = rawCode.replace(/^#/, '').trim()
+ticketRouter.post('/:code/open-folder', requireStaff, (req: Request, res: Response) => {
+  // Strict validation: this value used to be interpolated into a shell command (remote code execution).
+  const cleanCode = cleanTicketCode(req.params.code)
+  if (!cleanCode) {
+    return res.status(400).json({ error: 'Ticket code must be exactly 4 digits' })
+  }
   const vault = getVaultManager()
   const folderPath = vault ? vault.getTicketDir(cleanCode) : path.join(getDataPath(), 'tickets_vault', `Ticket_${cleanCode}`)
 
   fs.mkdirSync(folderPath, { recursive: true })
 
-  if (process.platform === 'win32') {
-    exec(`explorer "${folderPath}"`, (err) => {
-      if (err) {
-        console.warn('[Tickets] Failed opening Windows Explorer:', err)
-      }
-    })
-  } else if (process.platform === 'darwin') {
-    exec(`open "${folderPath}"`)
-  } else {
-    exec(`xdg-open "${folderPath}"`)
+  // No shell: the path is passed as a single argv entry
+  const opener = process.platform === 'win32' ? 'explorer' : process.platform === 'darwin' ? 'open' : 'xdg-open'
+  try {
+    const child = spawn(opener, [folderPath], { detached: true, stdio: 'ignore', shell: false })
+    child.on('error', (err) => console.warn('[Tickets] Failed opening folder:', err))
+    child.unref()
+  } catch (err) {
+    console.warn('[Tickets] Failed opening folder:', err)
   }
 
   res.json({ success: true, folderPath })
 })
 
 // ─── POST /api/tickets/issue ─────────────────────────────────────────────────
-ticketRouter.post('/issue', (req: Request, res: Response) => {
+ticketRouter.post('/issue', requireStaff, (req: Request, res: Response) => {
   const manager = getTicketManager()
   if (!manager) {
     return res.status(503).json({ error: 'Ticket manager not ready' })
@@ -175,15 +184,15 @@ ticketRouter.post('/issue', (req: Request, res: Response) => {
   const validatedName = customerName ? String(customerName).trim().slice(0, 40) : undefined
 
   // 4. Plan Validation
-  let validatedPlan: number = 99
+  let validatedPlan: number = DEFAULT_PLAN
   if (planType !== undefined) {
     const pNum = Number(planType)
-    if (pNum !== 99 && pNum !== 149 && pNum !== 179) {
-      return res.status(400).json({ error: 'Invalid plan type. Supported plans: 99, 149, 179' })
+    if (!isValidPlan(pNum)) {
+      return res.status(400).json({ error: `Invalid plan type. Supported plans: ${PLAN_PRICES.join(', ')}` })
     }
     validatedPlan = pNum
-  } else if (paymentAmount === 99 || paymentAmount === 149 || paymentAmount === 179) {
-    validatedPlan = paymentAmount
+  } else if (isValidPlan(paymentAmount)) {
+    validatedPlan = Number(paymentAmount)
   }
 
   // 5. Payment Method Validation
@@ -208,6 +217,9 @@ ticketRouter.post('/issue', (req: Request, res: Response) => {
 
   // 7. Payment Amount
   const validatedAmount = paymentAmount !== undefined ? Number(paymentAmount) : validatedPlan
+  if (!Number.isFinite(validatedAmount) || validatedAmount <= 0 || validatedAmount > 100000) {
+    return res.status(400).json({ error: 'Payment amount must be a positive number' })
+  }
 
   const ticket = manager.issueTicket({
     customerName: validatedName,
@@ -217,7 +229,7 @@ ticketRouter.post('/issue', (req: Request, res: Response) => {
     paymentMethod: validatedMethod,
     paymentAmount: validatedAmount,
     paymentStatus: validatedStatus,
-    paidAt,
+    paidAt: typeof paidAt === 'string' && !isNaN(Date.parse(paidAt)) ? paidAt : undefined,
     upiTransactionRef: upiTransactionRef ? String(upiTransactionRef).trim().slice(0, 60) : undefined,
     planType: validatedPlan,
   })
@@ -278,6 +290,9 @@ ticketRouter.post('/claim', (req: Request, res: Response) => {
     })
   }
 
+  if (sessionId !== undefined && (typeof sessionId !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId))) {
+    return res.status(400).json({ success: false, error: 'Invalid session ID' })
+  }
   const result = manager.claimTicket(cleanCode, sessionId)
   if (!result.success) {
     return res.status(400).json(result)
@@ -324,7 +339,35 @@ ticketRouter.post('/:id/status', (req: Request, res: Response) => {
     return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` })
   }
 
-  const updated = manager.updateTicketStatus(id, status, { photoCount, printCount, sessionId })
+  if (sessionId !== undefined && (typeof sessionId !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId))) {
+    return res.status(400).json({ error: 'Invalid session ID' })
+  }
+  const toCount = (v: unknown) => {
+    if (v === undefined || v === null) return undefined
+    const n = Number(v)
+    return Number.isInteger(n) && n >= 0 && n <= 500 ? n : NaN
+  }
+  const photoCountNum = toCount(photoCount)
+  const printCountNum = toCount(printCount)
+  if (Number.isNaN(photoCountNum) || Number.isNaN(printCountNum)) {
+    return res.status(400).json({ error: 'photoCount / printCount must be small non-negative integers' })
+  }
+
+  const current = manager.getTicketById(id) || manager.getTicketByCode(id)
+  if (!current) {
+    return res.status(404).json({ error: `Ticket not found: ${id}` })
+  }
+  // Guest-facing stations (booth Pi, editing iPad) may only move tickets forward.
+  // Staff (ticket desk) can force any status, e.g. to re-open or void a ticket.
+  if (!isStaff(req) && !isAllowedStationTransition(current.status, status, current.photoCount ?? 0)) {
+    return res.status(409).json({
+      error: `Ticket #${current.code} cannot go from ${current.status} to ${status} from this station.`,
+      code: 'INVALID_TRANSITION',
+      currentStatus: current.status,
+    })
+  }
+
+  const updated = manager.updateTicketStatus(current.id, status, { photoCount: photoCountNum, printCount: printCountNum, sessionId })
   if (!updated) {
     return res.status(404).json({ error: `Ticket not found: ${id}` })
   }
@@ -349,7 +392,7 @@ ticketRouter.post('/:id/status', (req: Request, res: Response) => {
 })
 
 // ─── POST /api/tickets/:id/payment ───────────────────────────────────────────
-ticketRouter.post('/:id/payment', (req: Request, res: Response) => {
+ticketRouter.post('/:id/payment', requireStaff, (req: Request, res: Response) => {
   const manager = getTicketManager()
   if (!manager) {
     return res.status(503).json({ error: 'Ticket manager not ready' })
@@ -362,7 +405,13 @@ ticketRouter.post('/:id/payment', (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Valid paymentStatus ("PAID" | "PENDING") is required' })
   }
 
-  if (paymentAmount !== undefined && (isNaN(Number(paymentAmount)) || Number(paymentAmount) <= 0)) {
+  if (paymentMethod !== undefined && paymentMethod !== 'UPI' && paymentMethod !== 'CASH') {
+    return res.status(400).json({ error: 'Payment method must be "UPI" or "CASH"' })
+  }
+  if (planType !== undefined && !isValidPlan(planType)) {
+    return res.status(400).json({ error: `Invalid plan type. Supported plans: ${PLAN_PRICES.join(', ')}` })
+  }
+  if (paymentAmount !== undefined && (!Number.isFinite(Number(paymentAmount)) || Number(paymentAmount) <= 0 || Number(paymentAmount) > 100000)) {
     return res.status(400).json({ error: 'Payment amount must be a positive number' })
   }
 
@@ -372,7 +421,7 @@ ticketRouter.post('/:id/payment', (req: Request, res: Response) => {
     paymentAmount: paymentAmount !== undefined ? Number(paymentAmount) : undefined,
     paidAt,
     upiTransactionRef,
-    planType,
+    planType: planType !== undefined ? Number(planType) : undefined,
   })
 
   if (!updated) {
@@ -391,7 +440,7 @@ ticketRouter.post('/:id/payment', (req: Request, res: Response) => {
 })
 
 // ─── POST /api/tickets/reset ─────────────────────────────────────────────────
-ticketRouter.post('/reset', (_req: Request, res: Response) => {
+ticketRouter.post('/reset', requireStaff, (_req: Request, res: Response) => {
   const manager = getTicketManager()
   if (!manager) {
     return res.status(503).json({ error: 'Ticket manager not ready' })
@@ -409,7 +458,7 @@ ticketRouter.post('/reset', (_req: Request, res: Response) => {
 })
 
 // ─── DELETE /api/tickets/:id ─────────────────────────────────────────────────
-ticketRouter.delete('/:id', (req: Request, res: Response) => {
+ticketRouter.delete('/:id', requireStaff, (req: Request, res: Response) => {
   const manager = getTicketManager()
   if (!manager) {
     return res.status(503).json({ error: 'Ticket manager not ready' })
@@ -430,3 +479,23 @@ ticketRouter.delete('/:id', (req: Request, res: Response) => {
 
   res.json({ success: true })
 })
+
+// ─── Ticket lifecycle rules for guest-facing stations ───────────────────────
+//   WAITING → IN_BOOTH → EDITING → PRINTING → COMPLETED
+// IN_BOOTH → IN_BOOTH is allowed only while no photos were uploaded (booth crashed / reloaded mid-shoot).
+// Re-shooting an EDITING ticket is NOT allowed — that used to give unlimited sessions per ticket.
+export function isAllowedStationTransition(from: TicketStatus, to: TicketStatus, photoCount: number): boolean {
+  if (from === 'COMPLETED' || from === 'CANCELLED') return false
+  switch (to) {
+    case 'IN_BOOTH':
+      return from === 'WAITING' || (from === 'IN_BOOTH' && photoCount === 0)
+    case 'EDITING':
+      return from === 'IN_BOOTH' || from === 'EDITING' || from === 'PRINTING'
+    case 'PRINTING':
+      return from === 'EDITING' || from === 'PRINTING'
+    case 'COMPLETED':
+      return from === 'EDITING' || from === 'PRINTING'
+    default:
+      return false // WAITING / CANCELLED are staff-only
+  }
+}

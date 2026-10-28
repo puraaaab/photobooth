@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
 """
-🍓 PAPIT PHOTOBOOTH - Ultra-Smooth, Continuous Camera Server
-Engineered for rock-solid stability:
-  - 1280x720 @ 25fps continuous stream (cool CPU, zero lag, smooth live preview)
-  - Instant /frame endpoint (<1ms) for rock-solid browser live preview
-  - Instant /capture endpoint (<1ms) for lag-free 2s countdown shooting
-  - Uninterrupted camera process (no hardware pausing/swapping)
+PAPIT PHOTOBOOTH - Raspberry Pi camera server (Camera Module 3 / IMX708)
+
+Backends
+  picamera2 (default on Raspberry Pi OS Bookworm):
+    - lores stream -> Pi 4 hardware MJPEG encoder -> /stream and /frame (live preview, ~768x432)
+    - main stream  -> REAL stills at 2304x1296 from the sensor's 2x2-binned mode (/capture)
+      (previously /capture returned a 1280x720 MJPEG video frame, ~0.9 MP, for prints)
+    - zoom via ScalerCrop: no camera restart, no black flash
+    - optional sensor HDR (CAMERA_HDR=1, Camera Module 3 only, 2304x1296 mode)
+  rpicam-vid (legacy fallback when picamera2 is missing): same HTTP API, capture = preview frame.
+
+HTTP API (unchanged)
+  :8080  GET /stream  /frame  /health  /zoom?level=2 | /zoom?roi=x,y,w,h
+  :8081  GET|POST /capture   GET /health
 """
 
+import glob
 import http.server
+import io
 import os
 import shutil
 import socketserver
@@ -56,7 +66,7 @@ print(f"  • Live preview:   http://0.0.0.0:{STREAM_PORT}/stream and /frame")
 print(f"  • Instant shot:   http://0.0.0.0:{CAPTURE_PORT}/capture")
 print("=" * 65, flush=True)
 
-class StreamingManager:
+class LegacyRpicamManager:
     def __init__(self):
         self.clients_lock = threading.Lock()
         self.clients = set()
@@ -143,6 +153,19 @@ class StreamingManager:
         except Exception as e:
             print(f"[Camera] Stream start error: {e}", flush=True)
 
+    backend = 'rpicam-vid'
+    still_size = (STREAM_W, STREAM_H)
+
+    def capture_still(self):
+        """Legacy backend has no separate still pipeline: return the newest preview frame."""
+        frame = self.latest_frame
+        for _ in range(5):
+            if frame and len(frame) > 2000:
+                return frame
+            time.sleep(0.08)
+            frame = self.latest_frame
+        return None
+
     def _reader_loop(self):
         buf = bytearray()
         while not self.stopped and self.proc and self.proc.poll() is None:
@@ -173,7 +196,148 @@ class StreamingManager:
                 self.latest_frame_time = time.time()
                 self.frame_count += 1
 
-streaming_mgr = StreamingManager()
+
+
+# --- picamera2 backend --------------------------------------------------------
+STILL_W = int(os.environ.get('STILL_W', 2304))   # 2304x1296 = IMX708 2x2 binned: fast, low noise, HDR-capable
+STILL_H = int(os.environ.get('STILL_H', 1296))   # set 4608x2592 for full 12MP (slower, more RAM)
+STILL_QUALITY = int(os.environ.get('STILL_QUALITY', 92))
+PREVIEW_W = int(os.environ.get('PREVIEW_W', 768))
+PREVIEW_H = int(os.environ.get('PREVIEW_H', 432))
+CAMERA_HDR = os.environ.get('CAMERA_HDR', '0') == '1'
+
+
+class _FrameSink(io.BufferedIOBase):
+    """Receives complete JPEG frames from the hardware MJPEG encoder."""
+
+    def __init__(self, manager):
+        super().__init__()
+        self.manager = manager
+
+    def writable(self):
+        return True
+
+    def write(self, buf):
+        self.manager.latest_frame = bytes(buf)
+        self.manager.latest_frame_time = time.time()
+        self.manager.frame_count += 1
+        return len(buf)
+
+
+def _set_sensor_hdr(enabled):
+    """Camera Module 3 sensor HDR is a V4L2 subdevice control, set before the camera starts."""
+    for dev in sorted(glob.glob('/dev/v4l-subdev*')):
+        try:
+            subprocess.run(['v4l2-ctl', '-d', dev, '--set-ctrl', 'wide_dynamic_range=%d' % (1 if enabled else 0)],
+                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
+            print(f"[Camera] Sensor HDR {'ON' if enabled else 'OFF'} via {dev}", flush=True)
+            return
+        except Exception:
+            continue
+
+
+class Picamera2Manager:
+    backend = 'picamera2'
+
+    def __init__(self):
+        from picamera2 import Picamera2
+        from picamera2.encoders import MJPEGEncoder
+        from picamera2.outputs import FileOutput
+        self._Picamera2 = Picamera2
+        self._MJPEGEncoder = MJPEGEncoder
+        self._FileOutput = FileOutput
+        self.picam2 = None
+        self.latest_frame = None
+        self.latest_frame_time = 0
+        self.frame_count = 0
+        self.stopped = False
+        self.roi = CAMERA_ROI
+        self.still_size = (STILL_W, STILL_H)
+        self.capture_lock = threading.Lock()
+
+    def start(self):
+        if CAMERA_HDR:
+            _set_sensor_hdr(True)
+        self.picam2 = self._Picamera2()
+        config = self.picam2.create_video_configuration(
+            main={'size': (STILL_W, STILL_H), 'format': 'RGB888'},
+            lores={'size': (PREVIEW_W, PREVIEW_H), 'format': 'YUV420'},
+            buffer_count=4,
+            controls={'FrameRate': STREAM_FPS},
+        )
+        self.picam2.configure(config)
+        self.picam2.options['quality'] = STILL_QUALITY
+        self._apply_tuning()
+        encoder = self._MJPEGEncoder()
+        self.picam2.start_recording(encoder, self._FileOutput(_FrameSink(self)), name='lores')
+        self._apply_roi(self.roi)
+        print(f"[Camera] picamera2 ready: stills {STILL_W}x{STILL_H} q{STILL_QUALITY}, preview {PREVIEW_W}x{PREVIEW_H} @ {STREAM_FPS}fps", flush=True)
+
+    def _apply_tuning(self):
+        wanted = {
+            'Sharpness': CAMERA_SHARPNESS,
+            'Contrast': CAMERA_CONTRAST,
+            'Saturation': CAMERA_SATURATION,
+            'ExposureValue': CAMERA_EV,
+        }
+        try:
+            from libcamera import controls as lc
+            wanted['AfMode'] = lc.AfModeEnum.Continuous
+            wanted['AfSpeed'] = lc.AfSpeedEnum.Fast
+            # cdn_off made every shot noisy; the 'fast' denoiser is free on the ISP
+            wanted['NoiseReductionMode'] = (lc.draft.NoiseReductionModeEnum.Off if CAMERA_DENOISE == 'off'
+                                            else lc.draft.NoiseReductionModeEnum.Fast)
+        except Exception:
+            pass
+        for key, value in wanted.items():
+            try:
+                self.picam2.set_controls({key: value})
+            except Exception as e:
+                print(f"[Camera] Control {key} not supported: {e}", flush=True)
+
+    def _apply_roi(self, roi):
+        try:
+            x, y, w, h = [float(v) for v in roi.split(',')]
+            mx, my, mw, mh = self.picam2.camera_properties['ScalerCropMaximum']
+            crop = (int(mx + x * mw), int(my + y * mh), max(64, int(w * mw)), max(64, int(h * mh)))
+            self.picam2.set_controls({'ScalerCrop': crop})
+        except Exception as e:
+            print(f"[Camera] Zoom (ScalerCrop) failed for ROI {roi}: {e}", flush=True)
+
+    def set_roi(self, new_roi):
+        if self.roi == new_roi:
+            return
+        self.roi = new_roi
+        print(f"[Camera] Setting Zoom ROI: {new_roi}", flush=True)
+        self._apply_roi(new_roi)  # live: no restart, no black frames
+
+    def capture_still(self):
+        """Grab the next full-quality frame from the main stream and JPEG-encode it."""
+        if not self.picam2:
+            return None
+        with self.capture_lock:
+            request = self.picam2.capture_request()
+            try:
+                out = io.BytesIO()
+                request.save('main', out, format='jpeg')
+                return out.getvalue()
+            finally:
+                request.release()
+
+
+def create_manager():
+    if os.environ.get('CAMERA_BACKEND', 'auto') != 'rpicam':
+        try:
+            mgr = Picamera2Manager()
+            mgr.start()
+            return mgr
+        except Exception as e:
+            print(f"[Camera] picamera2 unavailable ({e}); falling back to {VID_CMD}", flush=True)
+    mgr = LegacyRpicamManager()
+    mgr.start()
+    return mgr
+
+streaming_mgr = None
 
 class StreamHandler(http.server.BaseHTTPRequestHandler):
     def do_OPTIONS(self):
@@ -190,7 +354,8 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.send_header('Content-Type', 'application/json')
             has_feed = streaming_mgr.latest_frame is not None and (time.time() - streaming_mgr.latest_frame_time < 3.0)
-            body = f'{{"status":"ok","streaming":{str(has_feed).lower()},"fps":{STREAM_FPS},"w":{STREAM_W},"h":{STREAM_H}}}'.encode('utf-8')
+            sw, sh = streaming_mgr.still_size
+            body = f'{{"status":"ok","streaming":{str(has_feed).lower()},"backend":"{streaming_mgr.backend}","fps":{STREAM_FPS},"still":"{sw}x{sh}"}}'.encode('utf-8')
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -316,8 +481,14 @@ class CaptureHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(404, "Not Found")
 
     def handle_capture(self):
-        # Instant, 0ms latency photo capture from warm continuous stream
-        frame = streaming_mgr.latest_frame
+        try:
+            frame = streaming_mgr.capture_still()
+        except Exception as e:
+            print(f"[Camera] Still capture failed: {e}", flush=True)
+            frame = None
+        if not frame:
+            frame = streaming_mgr.latest_frame  # last resort: a preview frame beats a missed shot
+
         if frame and len(frame) > 2000:
             self.send_response(200)
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -327,19 +498,6 @@ class CaptureHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(frame)
             return
-
-        for _ in range(5):
-            time.sleep(0.08)
-            frame = streaming_mgr.latest_frame
-            if frame and len(frame) > 2000:
-                self.send_response(200)
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Content-Type', 'image/jpeg')
-                self.send_header('Content-Length', str(len(frame)))
-                self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
-                self.end_headers()
-                self.wfile.write(frame)
-                return
 
         self.send_response(503)
         self.send_header('Access-Control-Allow-Origin', '*')
@@ -354,8 +512,33 @@ class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
+def _announce_loop():
+    """Tell the laptop where this Pi is (every 10 s), so it never has to scan the network for us.
+    The laptop address comes from SERVER_URL or ~/.photobooth-server (written by find-server.sh)."""
+    import urllib.request
+    cache = os.path.expanduser('~/.photobooth-server')
+    while True:
+        target = os.environ.get('SERVER_URL', '').strip()
+        if not target:
+            try:
+                with open(cache) as f:
+                    target = 'http://' + f.read().strip()
+            except OSError:
+                target = ''
+        if target:
+            try:
+                req = urllib.request.Request(target.rstrip('/') + '/api/camera/announce', data=b'{}', method='POST',
+                                             headers={'Content-Type': 'application/json'})
+                urllib.request.urlopen(req, timeout=3).read()
+            except Exception:
+                pass
+        time.sleep(10)
+
+
 def run_servers():
-    streaming_mgr.start()
+    global streaming_mgr
+    streaming_mgr = create_manager()
+    threading.Thread(target=_announce_loop, daemon=True).start()
 
     stream_srv = ThreadedHTTPServer(('0.0.0.0', STREAM_PORT), StreamHandler)
     capture_srv = ThreadedHTTPServer(('0.0.0.0', CAPTURE_PORT), CaptureHandler)

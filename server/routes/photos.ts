@@ -6,6 +6,7 @@ import multer from 'multer'
 import { v4 as uuidv4 } from 'uuid'
 import sharp from 'sharp'
 import { getDataPath, io, getDatabase, getVaultManager, getTicketManager } from '../index'
+import { cleanTicketCode } from '../security'
 
 export const photoRouter = Router()
 
@@ -209,9 +210,11 @@ photoRouter.post('/upload', (req: Request, res: Response) => {
       fs.writeFileSync(sessionFile, JSON.stringify(session, null, 2))
 
       // ─── Save photo to Ticket Vault folder by Ticket Number ─────────────────
+      // A malformed header must not abort the upload (the vault rejects non 4-digit codes)
       let ticketCode: string | undefined =
-        (req.headers['x-ticket-code'] as string)?.replace(/^#/, '').trim() ||
-        session.ticketCode?.replace(/^#/, '').trim()
+        cleanTicketCode(req.headers['x-ticket-code']) ||
+        cleanTicketCode(session.ticketCode) ||
+        undefined
 
       if (!ticketCode) {
         const matchingTicket = getTicketManager()?.listTickets().find(t => t.sessionId === sessionId)
@@ -228,9 +231,13 @@ photoRouter.post('/upload', (req: Request, res: Response) => {
       if (ticketCode) {
         const vault = getVaultManager()
         if (vault) {
-          const saved = vault.savePhoto(ticketCode, photoId, originalPath, thumbPath)
-          vaultOriginalPath = saved.vaultOriginal
-          console.log(`[Photos] Saved photo to ticket vault: Ticket #${ticketCode} -> ${saved.vaultOriginal}`)
+          try {
+            const saved = vault.savePhoto(ticketCode, photoId, originalPath, thumbPath)
+            vaultOriginalPath = saved.vaultOriginal
+          } catch (vaultErr) {
+            // The session copy is the source of truth; a vault failure must not lose the photo
+            console.warn(`[Photos] Vault copy failed for ticket #${ticketCode}:`, vaultErr)
+          }
         }
       }
 

@@ -4,6 +4,7 @@ import * as fs from 'fs'
 import * as crypto from 'crypto'
 import { v4 as uuidv4 } from 'uuid'
 import { getDataPath, io, getDatabase } from '../index'
+import { requireStaff, isStaff, cleanTicketCode, isSafeId } from '../security'
 
 export const sessionRouter = Router()
 
@@ -18,7 +19,13 @@ sessionRouter.post('/create', (req: Request, res: Response) => {
   
   // 64-char crypto session token
   const sessionToken = crypto.randomBytes(32).toString('hex')
-  const cleanTicketCode = ticketCode ? String(ticketCode).replace(/^#/, '').trim() : undefined
+  if (ticketCode && !cleanTicketCode(ticketCode)) {
+    return res.status(400).json({ error: 'Ticket code must be exactly 4 digits' })
+  }
+  if (ticketId !== undefined && !isSafeId(ticketId)) {
+    return res.status(400).json({ error: 'Invalid ticket ID' })
+  }
+  const cleanCode = cleanTicketCode(ticketCode) ?? undefined
   
   const session = {
     id: sessionId,
@@ -27,7 +34,7 @@ sessionRouter.post('/create', (req: Request, res: Response) => {
     status: 'receiving',
     piId: piId ?? 'unknown',
     piName: piName ?? 'Camera Unit',
-    ticketCode: cleanTicketCode,
+    ticketCode: cleanCode,
     ticketId: ticketId ?? undefined,
     photos: [],
     selectedPhotoIds: [],
@@ -65,7 +72,7 @@ sessionRouter.post('/create', (req: Request, res: Response) => {
   if (db) {
     db.upsertSession({
       id: sessionId,
-      ticketCode: cleanTicketCode,
+      ticketCode: cleanCode,
       ticketId: ticketId ?? undefined,
       sessionToken,
       status: 'receiving',
@@ -74,16 +81,16 @@ sessionRouter.post('/create', (req: Request, res: Response) => {
       createdAt: now.toISOString(),
       photoCount: 0,
     })
-    db.logAudit('SESSION_CREATED', cleanTicketCode, sessionId, { piName: piName ?? 'Camera Unit' })
+    db.logAudit('SESSION_CREATED', cleanCode, sessionId, { piName: piName ?? 'Camera Unit' })
   }
   
-  io?.emit('session:created', { sessionId, piName: piName ?? 'Camera Unit', ticketCode: cleanTicketCode })
-  console.log(`[Sessions] Created collision-free session: ${sessionId} [Ticket: #${cleanTicketCode || 'N/A'}]`)
+  io?.emit('session:created', { sessionId, piName: piName ?? 'Camera Unit', ticketCode: cleanCode })
+  console.log(`[Sessions] Created collision-free session: ${sessionId} [Ticket: #${cleanCode || 'N/A'}]`)
   
   res.json({
     sessionId,
     sessionToken,
-    ticketCode: cleanTicketCode,
+    ticketCode: cleanCode,
     uploadEndpoint: `/api/photos/upload`,
     wsEndpoint: `/`,
   })
@@ -158,18 +165,21 @@ sessionRouter.post('/:id/update', (req: Request, res: Response) => {
   }
   
   const session = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'))
-  const updates = req.body
-  
-  // Merge updates safely, preserving photos
-  const updated = { ...session, ...updates, photos: session.photos }
+  const updates = (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) ? { ...req.body } : {}
+  // Server-owned fields: clients must not be able to replace the upload token, re-bind the
+  // ticket or rewrite photo records.
+  for (const key of ['id', 'sessionToken', 'photos', 'ticketCode', 'ticketId', 'createdAt', 'piId', 'piName']) {
+    delete (updates as Record<string, unknown>)[key]
+  }
+  const updated = { ...session, ...updates }
   fs.writeFileSync(sessionFile, JSON.stringify(updated, null, 2))
   
   res.json({ success: true })
 })
 
 // ─── POST /api/session/cleanup ───────────────────────────────────────────
-sessionRouter.post('/cleanup', (req: Request, res: Response) => {
-  const retentionDays = Math.max(1, Math.min(365, Number(req.body.retentionDays) || 7))
+sessionRouter.post('/cleanup', requireStaff, (req: Request, res: Response) => {
+  const retentionDays = Math.max(1, Math.min(365, Number(req.body?.retentionDays) || 7))
   const sessionsDir = path.join(getDataPath(), 'sessions')
   
   if (!fs.existsSync(sessionsDir)) {
@@ -231,12 +241,8 @@ sessionRouter.post('/cleanup', (req: Request, res: Response) => {
 
 // ─── GET /api/session (Protected against unauthenticated LAN scraping) ────
 sessionRouter.get('/', (req: Request, res: Response) => {
-  // Allow local loopback callers or admin token
-  const clientIp = req.ip || req.socket.remoteAddress || ''
-  const isLoopback = clientIp.includes('127.0.0.1') || clientIp === '::1' || clientIp.includes('localhost')
-  const adminHeader = req.headers['x-admin-auth']
-
-  if (!isLoopback && !adminHeader) {
+  // Any non-empty x-admin-auth header used to be accepted here; now: server machine or staff PIN
+  if (!isStaff(req)) {
     return res.status(403).json({ error: 'Access restricted to kiosk host' })
   }
 
@@ -268,6 +274,9 @@ sessionRouter.get('/', (req: Request, res: Response) => {
 // ─── Token validation middleware ──────────────────────────────────────────
 function validateToken(req: Request, res: Response, next: () => void) {
   const id = req.params.id as string
+  if (!isSafeId(id)) {
+    return res.status(400).json({ error: 'Invalid session ID' })
+  }
   const authHeader = req.headers.authorization
   
   if (!authHeader?.startsWith('Bearer ')) {

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Ticket, TicketStatus, TicketPlan } from '@/types'
+import { isValidPlan, DEFAULT_PLAN } from '@/constants/pricing'
 
 const SERVER_BASE = typeof window !== 'undefined' && window.location.hostname
   ? `http://${window.location.hostname}:3847`
@@ -89,7 +90,8 @@ interface QueueState {
       paidAt?: string
       upiTransactionRef?: string
       planType?: TicketPlan
-    }
+    },
+    opts?: { staffPin?: string }
   ) => Promise<Ticket | null>
   resetQueue: () => Promise<void>
   deleteTicket: (ticketId: string) => Promise<void>
@@ -194,7 +196,7 @@ export const useQueueStore = create<QueueState>()((set, get) => {
         code = generateRandomTicketCode(state.tickets)
       }
 
-      const planType = input.planType || (input.paymentAmount === 99 || input.paymentAmount === 149 || input.paymentAmount === 179 ? (input.paymentAmount as TicketPlan) : 99)
+      const planType = input.planType || (isValidPlan(input.paymentAmount) ? (input.paymentAmount as TicketPlan) : (DEFAULT_PLAN as TicketPlan))
       const paymentAmount = input.paymentAmount !== undefined ? input.paymentAmount : (planType ?? (input.paymentMethod ? 99 : undefined))
       const paymentStatus = input.paymentStatus || (input.paymentMethod === 'UPI' ? 'PAID' : (input.paymentMethod === 'CASH' ? 'PENDING' : undefined))
       const paidAt = input.paidAt || (paymentStatus === 'PAID' ? new Date().toISOString() : undefined)
@@ -336,13 +338,22 @@ export const useQueueStore = create<QueueState>()((set, get) => {
     },
 
     // ─── Update Ticket Payment ──────────────────────────────────────────────
-    updateTicketPayment: async (ticketId, payment) => {
+    updateTicketPayment: async (ticketId, payment, opts) => {
       try {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+        if (opts?.staffPin) headers['X-Staff-Pin'] = opts.staffPin
         const res = await fetch(`${SERVER_BASE}/api/tickets/${ticketId}/payment`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify(payment),
         })
+
+        // The server answered and refused (e.g. 403 staff PIN required). Do NOT fall through to
+        // the offline path — that used to mark tickets PAID locally even though nobody approved it.
+        if (!res.ok) {
+          console.warn('[QueueStore] Payment update rejected:', res.status)
+          return null
+        }
 
         if (res.ok) {
           const { ticket } = await res.json()

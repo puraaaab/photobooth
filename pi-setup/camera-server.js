@@ -299,7 +299,7 @@ captureApp.get('/health', (_req, res) => {
     status: 'ok',
     camera: streamProcess ? 'streaming' : 'idle',
     clients: streamClients.size,
-    config: { zoom: ZOOM_ROI, quality: JPEG_QUALITY, resolution: `${STILL_W}x${STILL_H}` },
+    config: { zoom: currentRoi, quality: JPEG_QUALITY, resolution: `${STILL_W}x${STILL_H}` },
     storageDir: PHOTO_STORAGE_DIR,
   })
 })
@@ -462,7 +462,7 @@ captureServer.listen(CAPTURE_PORT, '0.0.0.0', () => {
   console.log(`[Camera] Health check       → http://localhost:${CAPTURE_PORT}/health`)
   console.log('')
   console.log('[Camera] Config:')
-  console.log(`  Zoom ROI:    ${ZOOM_ROI}`)
+  console.log(`  Zoom ROI:    ${currentRoi}`)
   console.log(`  JPEG quality: ${JPEG_QUALITY}`)
   console.log(`  Stream:      ${STREAM_W}×${STREAM_H} @ ${STREAM_FPS}fps`)
   console.log(`  Still:       ${STILL_W}×${STILL_H}`)

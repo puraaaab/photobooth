@@ -16,7 +16,9 @@ import { PhonePadModal } from '@/components/modals/PhonePadModal'
 import { getPhotoUrl } from '@/utils/photoUrl'
 import { getDefaultTemplateForPhotoCount } from '@/data/templates'
 import { openRazorpayCheckout } from '@/utils/razorpay'
+import { AutoUpiQr } from '@/components/ui/AutoUpiQr'
 import type { TicketPlan } from '@/types'
+import { stripLimitForPlan, upgradeOffersFor, isValidPlan, getPlan } from '@/constants/pricing'
 
 interface ExportScreenProps {
   onBack: () => void
@@ -27,8 +29,12 @@ type ExportFormat = 'jpeg' | 'png' | 'webp' | 'pdf'
 type PaperLayout = 'a5-2' | '4x6-duplex' | 'a4-5' | 'a4-6' | 'a4-8' | 'a4-4' | '4x5-split' | '4x6-split' | 'single'
 
 // Plan-to-layout mapping
-const PLAN_STRIP_LIMITS: Record<number, number> = { 99: 2, 149: 3, 179: 5 }
-const PLAN_LAYOUTS: Record<number, PaperLayout> = { 99: 'a5-2', 149: 'a4-5', 179: 'a4-5' }
+// Strip allowance per plan comes from src/constants/pricing.ts. Every current plan prints on A5
+// (2 strips per sheet); only the retired 149/179 plans used the A4 5-up sheet.
+const PLAN_STRIP_LIMITS = new Proxy({} as Record<number, number>, { get: (_t, k) => stripLimitForPlan(Number(k)) })
+const PLAN_LAYOUTS = new Proxy({} as Record<number, PaperLayout>, {
+  get: (_t, k) => (Number(k) === 149 || Number(k) === 179 ? 'a4-5' : 'a5-2'),
+})
 
 function normalizePhotoUrl(rawUrl?: string): string {
   if (!rawUrl) return ''
@@ -166,7 +172,7 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
   const [dpi, setDpi] = useState(300)
   const [copies, setCopies] = useState<number>(session?.printSettings?.copies || 1)
   const [paperLayout, setPaperLayout] = useState<PaperLayout>(() => {
-    // Auto-select based on ticket plan if available (e.g. ₹99 is A5 2-strip layout, ₹149/₹179 is A4 5-strip)
+    // Auto-select based on ticket plan (all current plans: A5, 2 strips per sheet)
     const ticket = useQueueStore.getState().activeTicket
     const plan = ticket?.planType ?? ticket?.paymentAmount
     if (plan && PLAN_LAYOUTS[plan as number]) return PLAN_LAYOUTS[plan as number]
@@ -230,7 +236,7 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
   const resolvedTicket = session?.ticketId
     ? (useQueueStore.getState().tickets.find(t => t.id === session.ticketId) || activeTicket)
     : activeTicket
-  const ticketPlan = resolvedTicket?.planType ?? (resolvedTicket?.paymentAmount as (99 | 149 | 179) | undefined)
+  const ticketPlan = resolvedTicket?.planType ?? (resolvedTicket?.paymentAmount as TicketPlan | undefined)
   const [upgradedPlan, setUpgradedPlan] = useState<TicketPlan | null>(null)
   const [selectedUpsellTier, setSelectedUpsellTier] = useState<'tier1' | 'tier2'>('tier2')
   const [showUpsellModal, setShowUpsellModal] = useState(false)
@@ -239,7 +245,7 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
   // Current effective plan & strip limit
   const effectivePlan: TicketPlan =
     upgradedPlan ||
-    (ticketPlan === 99 || ticketPlan === 149 || ticketPlan === 179 ? (ticketPlan as TicketPlan) : 99)
+    (ticketPlan && (isValidPlan(ticketPlan) || ticketPlan === 149 || ticketPlan === 179) ? (ticketPlan as TicketPlan) : 99)
   const planStripLimit = PLAN_STRIP_LIMITS[effectivePlan] ?? 2
   const isPlanExceeded = strips.length > planStripLimit
 
@@ -288,18 +294,18 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
 
   // Payment method state for upsell modal (Razorpay, Direct UPI, or Cash)
   const [upsellPaymentMethod, setUpsellPaymentMethod] = useState<'razorpay' | 'upi' | 'cash'>('razorpay')
+  const [staffPinInput, setStaffPinInput] = useState('')
+  const [staffPinError, setStaffPinError] = useState('')
 
   // Upsell offers definition
-  const upgradeOffers = effectivePlan === 149
-    ? {
-        tier1: { fee: 30, targetPlan: 179 as TicketPlan, title: '+₹30 · Unlock 4 Strips', desc: 'Add 1 more strip to your A4 print' },
-        tier2: { fee: 49, targetPlan: 179 as TicketPlan, title: '+₹49 · Unlock All 5 Strips', desc: 'BEST VALUE ⭐ Unlock 2 more strips (all 5 on full A4!)' },
-      }
-    : {
-        tier1: { fee: 49, targetPlan: 149 as TicketPlan, title: '+₹49 · Unlock 3 Strips', desc: 'Add 1 extra strip (printed on A4 sheet)' },
-        tier2: { fee: 79, targetPlan: 179 as TicketPlan, title: '+₹79 · Unlock All 5 Strips', desc: 'BEST VALUE ⭐ Unlock 2 more strips (total 5 on full A4!)' },
-      }
-  const currentUpgrade = selectedUpsellTier === 'tier1' ? upgradeOffers.tier1 : upgradeOffers.tier2
+  // Upsell at the editing station: +1 or +2 A5 sheets (2 strips each), priced in src/constants/pricing.ts
+  const planOffers = upgradeOffersFor(upgradedPlan || effectivePlan)
+  const noOffer = { fee: 0, targetPlan: effectivePlan, title: 'Maximum plan', desc: 'You already have the largest plan', extraSheets: 0, strips: planStripLimit }
+  const upgradeOffers = {
+    tier1: planOffers[0] ?? noOffer,
+    tier2: planOffers[planOffers.length - 1] ?? noOffer,
+  }
+  const currentUpgrade = (selectedUpsellTier === 'tier1' ? upgradeOffers.tier1 : upgradeOffers.tier2) as typeof upgradeOffers.tier1 & { targetPlan: TicketPlan }
   const upgradeUpiUrl = `upi://pay?pa=9313780044@superyes&pn=Photobooth&am=${currentUpgrade.fee}&cu=INR&tn=Upgrade Ticket ${ticketNumber}`
 
   const handleFinishSession = useCallback(async () => {
@@ -312,8 +318,14 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
     onNewSession()
   }, [session?.ticketId, session?.id, session?.strips?.length, copies, onNewSession])
 
+  // Copies multiply paper used, so they are capped by what the plan paid for:
+  // e.g. ₹99 = 2 strips → 2 designed strips allow 1 copy, 1 strip allows 2 copies.
+  const maxCopiesForPlan = Math.max(1, Math.floor(planStripLimit / Math.max(1, Math.min(strips.length, selectedStripIndices.length || strips.length))))
   const handleCopiesChange = (newCopies: number) => {
-    const clamped = Math.max(1, Math.min(10, newCopies))
+    const clamped = Math.max(1, Math.min(maxCopiesForPlan, 10, newCopies))
+    if (newCopies > clamped) {
+      toast(`Your plan covers ${planStripLimit} strips. Ask the attendant for extra copies.`, 'info')
+    }
     setCopies(clamped)
     setPrintSettings({ copies: clamped })
   }
@@ -1494,10 +1506,124 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
     paperLayout === 'single' ? totalPrints :
     totalA4Sheets
 
+  // ─── Server copy for QR download / email / SMS ───────────────────────────
+  // The download & email routes serve the newest file in sessions/<id>/exports, but in browser
+  // mode nothing ever wrote one, so every QR scan and email returned 404.
+  const sharedExportPromiseRef = useRef<Promise<boolean> | null>(null)
+  const ensureSharedExport = useCallback((): Promise<boolean> => {
+    if (!session?.id || strips.length === 0) return Promise.resolve(false)
+    if (sharedExportPromiseRef.current) return sharedExportPromiseRef.current
+    const run = (async () => {
+      try {
+        const idx = selectedStripIndices[0] ?? 0
+        const canvas = await renderStripCanvas(idx)
+        if (!canvas) return false
+        const res = await fetch(`http://${window.location.hostname || 'localhost'}:3847/api/export/save-strip`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: session.id,
+            ticketCode: /^\d{4}$/.test(ticketNumber) ? ticketNumber : undefined,
+            filename: 'strip-share.jpg',
+            dataUrl: canvas.toDataURL('image/jpeg', 0.9),
+          }),
+        })
+        return res.ok
+      } catch (err) {
+        console.warn('[Export] Failed to upload share copy:', err)
+        return false
+      }
+    })()
+    sharedExportPromiseRef.current = run
+    run.then(ok => { if (!ok) sharedExportPromiseRef.current = null })
+    return run
+  }, [session?.id, strips.length, selectedStripIndices, renderStripCanvas, ticketNumber])
+
   // ─── Direct Silent Print via Spooler with Roll Tracking ───────────────────
   // ─── Direct Silent Print via Spooler with Roll Tracking ───────────────────
+  const printedOnceRef = useRef(false)
+
+  // ─── Network printer (laptop server → Wi-Fi printer over IPP) ─────────────
+  // When available, sheets go straight to the printer with copies fixed by the server, so the
+  // guest never sees the iOS print dialog. Otherwise we fall back to AirPrint.
+  const [networkPrinter, setNetworkPrinter] = useState<{ reachable: boolean; model?: string; state?: string; ink?: Array<{ name: string; level: number }> } | null>(null)
+  const networkPrinterRef = useRef(networkPrinter)
+  networkPrinterRef.current = networkPrinter
+  useEffect(() => {
+    let alive = true
+    const poll = async () => {
+      try {
+        const r = await fetch(`http://${window.location.hostname || 'localhost'}:3847/api/print/status`, { signal: AbortSignal.timeout(6000) })
+        const d = await r.json()
+        if (alive) setNetworkPrinter(d.reachable ? { reachable: true, model: d.printer?.model, state: d.printer?.state, ink: d.printer?.ink } : null)
+      } catch {
+        if (alive) setNetworkPrinter(null)
+      }
+    }
+    poll()
+    const t = setInterval(poll, 15000)
+    return () => { alive = false; clearInterval(t) }
+  }, [])
+
+  const sendToNetworkPrinter = useCallback(async (sheetUrls: string[], stripCount: number): Promise<'ok' | 'denied' | 'failed'> => {
+    // PNG sheets at 300 dpi are several MB each; JPEG keeps the upload fast over Wi-Fi
+    const toJpeg = (url: string) => new Promise<string>((resolve, reject) => {
+      if (url.startsWith('data:image/jpeg')) return resolve(url)
+      const img = new Image()
+      img.onload = () => {
+        const c = document.createElement('canvas')
+        c.width = img.naturalWidth
+        c.height = img.naturalHeight
+        const ctx = c.getContext('2d')
+        if (!ctx) return reject(new Error('no canvas'))
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, c.width, c.height)
+        ctx.drawImage(img, 0, 0)
+        resolve(c.toDataURL('image/jpeg', 0.95))
+        c.width = 0
+        c.height = 0
+      }
+      img.onerror = () => reject(new Error('sheet decode failed'))
+      img.src = url
+    })
+    const sheets = await Promise.all(sheetUrls.map(toJpeg))
+    const body = JSON.stringify({ ticketId: session?.ticketId, sessionId: session?.id, stripCount, sheets })
+    const post = (pin?: string) => fetch(`http://${window.location.hostname || 'localhost'}:3847/api/print/job`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(pin ? { 'X-Staff-Pin': pin } : {}) },
+      body,
+    })
+
+    let res = await post()
+    let data = await res.json().catch(() => ({}))
+    if (res.status === 403) {
+      const pin = window.prompt(`${data.error || 'This print needs staff approval.'}\n\nAttendant: enter staff PIN to approve`)
+      if (!pin) return 'denied'
+      res = await post(pin)
+      data = await res.json().catch(() => ({}))
+    }
+    if (res.ok) return 'ok'
+    toast(data.error || 'Printer error', 'error')
+    return res.status === 403 || res.status === 402 ? 'denied' : 'failed'
+  }, [session?.ticketId, session?.id, toast])
+
   const handlePrint = useCallback(async (opts?: { overridePlan?: TicketPlan; maxStrips?: number; allowSelected?: boolean }) => {
     if (!session || strips.length === 0) return
+
+    // A ticket buys one print run. Reprints (paper jam, smudge…) need an attendant.
+    // (With a network printer the server enforces this itself, per ticket.)
+    if (printedOnceRef.current && !networkPrinterRef.current?.reachable) {
+      const pin = window.prompt('Reprint needs staff approval. Attendant: enter staff PIN')
+      if (!pin) return
+      const ok = await fetch(`http://${window.location.hostname || 'localhost'}:3847/api/staff/verify`, {
+        method: 'POST',
+        headers: { 'X-Staff-Pin': pin },
+      }).then(r => r.ok).catch(() => false)
+      if (!ok) {
+        toast('Reprint not approved.', 'error')
+        return
+      }
+    }
     setPrinting(true)
 
     try {
@@ -1505,7 +1631,7 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
       const limit = opts?.maxStrips !== undefined ? opts.maxStrips : (PLAN_STRIP_LIMITS[activePlan] ?? null)
 
       // 0. Plan strip limit check — show upsell if exceeding plan (unless user explicitly prints chosen selection or upgraded)
-      if (!opts?.allowSelected && opts?.maxStrips === undefined && opts?.overridePlan === undefined && limit !== null && strips.length > limit && !upgradedPlan) {
+      if (!opts?.allowSelected && opts?.maxStrips === undefined && opts?.overridePlan === undefined && limit !== null && strips.length > limit && !upgradedPlan && planOffers.length > 0) {
         setUpsellExceededCount(strips.length - limit)
         setShowUpsellModal(true)
         setPrinting(false)
@@ -1644,12 +1770,30 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
         decrementRollCount(physicalSheets)
         recordPrintJob(copies)
         setExportedPaths(printSheetUrls)
+        printedOnceRef.current = true
         toast(`Sent ${printSheetUrls.length} sheet(s) to silent print spooler!`, 'success')
         setPrinting(false)
         return
       }
 
-      // 4. Browser fallback: hidden iframe printing
+      // 4. Network printer via the laptop server (no iOS dialog, copies fixed server-side)
+      if (networkPrinterRef.current?.reachable) {
+        const physicalStrips = activeLayout === 'a5-2' ? printSheetUrls.length * 2 : singleStripCanvases.length * copies
+        const outcome = await sendToNetworkPrinter(printSheetUrls, physicalStrips)
+        if (outcome === 'ok') {
+          decrementRollCount(physicalSheets)
+          recordPrintJob(copies)
+          setExportedPaths(printSheetUrls)
+          printedOnceRef.current = true
+          ensureSharedExport()
+          toast(`Printing ${printSheetUrls.length} sheet(s) on ${networkPrinterRef.current?.model || 'the printer'}…`, 'success')
+        }
+        setPrinting(false)
+        // 'failed' = printer problem: do not silently fall back to AirPrint (that reopens the copies loophole)
+        return
+      }
+
+      // 5. Browser fallback (no network printer configured): AirPrint via hidden iframe
       const printIframe = document.createElement('iframe')
       printIframe.style.position = 'fixed'
       printIframe.style.top = '-9999px'
@@ -1762,6 +1906,8 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
         }
       }, 30000)
 
+      printedOnceRef.current = true
+      ensureSharedExport()
       decrementRollCount(physicalSheets)
       recordPrintJob(copies)
       setExportedPaths(printSheetUrls)
@@ -1775,30 +1921,48 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
   }, [
     session, strips, copies, paperLayout, paperSaving, settings, physicalSheets,
     renderStripCanvas, renderA5DuplexCanvas, render4x6DuplexCanvas, renderDyeSub4x5Canvas, renderDyeSub4x6Canvas, renderA4SheetCanvas,
-    effectivePlan, decrementRollCount, recordPrintJob, toast
+    effectivePlan, planOffers.length, decrementRollCount, recordPrintJob, toast, sendToNetworkPrinter, ensureSharedExport
   ])
 
   // ─── Plan Upgrade and Partial Print Handlers ────────────────────────────────
-  const handleConfirmUpgrade = useCallback(async (customTargetPlan?: TicketPlan, paymentMethod: 'UPI' | 'CASH' = 'UPI') => {
+  // customTargetPlan set  → paid online via Razorpay; the server already recorded it in /verify-payment.
+  // customTargetPlan unset → cash / manual UPI: an attendant must approve with the staff PIN, which the
+  //                          server checks. (Previously the guest could tap "I have paid" and print free.)
+  const handleConfirmUpgrade = useCallback(async (
+    customTargetPlan?: TicketPlan,
+    paymentMethod: 'UPI' | 'CASH' = 'UPI',
+    staffPin?: string,
+  ): Promise<boolean> => {
     const target = customTargetPlan || currentUpgrade.targetPlan
-    setUpgradedPlan(target)
-    setPaperLayout('a4-5')
-    setShowUpsellModal(false)
+    const paidOnline = customTargetPlan !== undefined
 
-    if (session?.ticketId) {
-      const addedFee = customTargetPlan ? 0 : currentUpgrade.fee
-      const newTotal = (resolvedTicket?.paymentAmount || 99) + addedFee
-      await useQueueStore.getState().updateTicketPayment(session.ticketId, {
-        paymentStatus: 'PAID',
-        paymentMethod: paymentMethod,
-        paymentAmount: newTotal,
-      })
+    if (!paidOnline) {
+      if (!staffPin) return false
+      const base = `http://${window.location.hostname || 'localhost'}:3847`
+      if (session?.ticketId) {
+        const newTotal = (resolvedTicket?.paymentAmount || resolvedTicket?.planType || 99) + currentUpgrade.fee
+        const updated = await useQueueStore.getState().updateTicketPayment(session.ticketId, {
+          paymentStatus: 'PAID',
+          paymentMethod,
+          paymentAmount: newTotal,
+          planType: target,
+        }, { staffPin })
+        if (!updated) return false
+      } else {
+        const res = await fetch(`${base}/api/staff/verify`, { method: 'POST', headers: { 'X-Staff-Pin': staffPin } }).catch(() => null)
+        if (!res?.ok) return false
+      }
     }
+
+    setUpgradedPlan(target)
+    setPaperLayout(PLAN_LAYOUTS[target])
+    setShowUpsellModal(false)
     toast(`Plan upgraded to ₹${target} via ${paymentMethod}! Printing all your strips now...`, 'success')
     setTimeout(() => {
       handlePrint({ overridePlan: target })
     }, 250)
-  }, [currentUpgrade, session?.ticketId, resolvedTicket?.paymentAmount, handlePrint, toast])
+    return true
+  }, [currentUpgrade, session?.ticketId, resolvedTicket?.paymentAmount, resolvedTicket?.planType, handlePrint, toast])
 
   const handlePrintOnlyPaidStrips = useCallback(() => {
     setShowUpsellModal(false)
@@ -3327,7 +3491,7 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
               <button
                 type="button"
-                onClick={() => setShowQrModal(true)}
+                onClick={() => { ensureSharedExport(); setShowQrModal(true) }}
                 className="btn btn-secondary"
                 style={{
                   display: 'flex',
@@ -3347,7 +3511,7 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
 
               <button
                 type="button"
-                onClick={() => setShowEmailModal(true)}
+                onClick={() => { ensureSharedExport(); setShowEmailModal(true) }}
                 className="btn btn-secondary"
                 style={{
                   display: 'flex',
@@ -3367,7 +3531,7 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
 
               <button
                 type="button"
-                onClick={() => setShowSmsModal(true)}
+                onClick={() => { ensureSharedExport(); setShowSmsModal(true) }}
                 className="btn btn-secondary"
                 style={{
                   display: 'flex',
@@ -3728,7 +3892,8 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
                   onClick={async () => {
                     setSendingEmail(true)
                     try {
-                      const res = await fetch(`http://${window.location.hostname || 'localhost'}:3847/api/email/send`, {
+                      await ensureSharedExport()
+            const res = await fetch(`http://${window.location.hostname || 'localhost'}:3847/api/email/send`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -3769,6 +3934,7 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
         onClose={() => setShowSmsModal(false)}
         onSend={async (phoneNumber) => {
           try {
+            await ensureSharedExport()
             const res = await fetch(`http://${window.location.hostname || 'localhost'}:3847/api/sms/send`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -4188,11 +4354,24 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
                     marginBottom: 16,
                   }}
                 >
-                  <QRCodeSVG
-                    value={upgradeUpiUrl}
-                    size={135}
-                    level="M"
-                    includeMargin={false}
+                  <AutoUpiQr
+                    amount={currentUpgrade.fee}
+                    ticketId={session?.ticketId}
+                    planType={currentUpgrade.targetPlan}
+                    size={150}
+                    onPaid={(paymentId) => {
+                      // Server already credited the ticket; just unlock and print
+                      toast(`Payment received (${paymentId})`, 'success')
+                      handleConfirmUpgrade(currentUpgrade.targetPlan, 'UPI')
+                    }}
+                    fallback={
+                      <QRCodeSVG
+                        value={upgradeUpiUrl}
+                        size={135}
+                        level="M"
+                        includeMargin={false}
+                      />
+                    }
                   />
                   <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                     <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#111827', letterSpacing: '0.02em' }}>
@@ -4235,10 +4414,40 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
               {/* Action Buttons */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {upsellPaymentMethod !== 'razorpay' && (
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    maxLength={8}
+                    placeholder="Attendant: enter staff PIN to approve"
+                    value={staffPinInput}
+                    onChange={(e) => { setStaffPinInput(e.target.value.replace(/\D/g, '')); setStaffPinError('') }}
+                    style={{
+                      height: 44,
+                      borderRadius: 'var(--radius-full)',
+                      border: staffPinError ? '2px solid #ef4444' : '1px solid rgba(255,255,255,0.3)',
+                      background: 'rgba(255,255,255,0.95)',
+                      color: '#111827',
+                      textAlign: 'center',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 14,
+                      letterSpacing: '0.2em',
+                    }}
+                  />
+                )}
+                {upsellPaymentMethod !== 'razorpay' && staffPinError && (
+                  <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: '#fca5a5', textAlign: 'center' }}>{staffPinError}</span>
+                )}
+                {upsellPaymentMethod !== 'razorpay' && (
                   <button
-                    onClick={() => {
-                      setShowUpsellModal(false)
-                      handleConfirmUpgrade(undefined, upsellPaymentMethod === 'cash' ? 'CASH' : 'UPI')
+                    disabled={staffPinInput.length < 4}
+                    onClick={async () => {
+                      const ok = await handleConfirmUpgrade(undefined, upsellPaymentMethod === 'cash' ? 'CASH' : 'UPI', staffPinInput)
+                      if (ok) {
+                        setStaffPinInput('')
+                      } else {
+                        setStaffPinError('Not approved — wrong staff PIN or server unreachable.')
+                      }
                     }}
                     className="btn btn-primary"
                     style={{
@@ -4262,8 +4471,8 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
                     <Sparkles size={16} />
                     <span>
                       {upsellPaymentMethod === 'cash'
-                        ? `CONFIRM CASH PAID (₹${currentUpgrade.fee}) → UNLOCK & PRINT`
-                        : `I HAVE PAID ₹${currentUpgrade.fee} VIA UPI → UNLOCK & PRINT`}
+                        ? `STAFF: CASH ₹${currentUpgrade.fee} RECEIVED → UNLOCK & PRINT`
+                        : `STAFF: UPI ₹${currentUpgrade.fee} RECEIVED → UNLOCK & PRINT`}
                     </span>
                   </button>
                 )}

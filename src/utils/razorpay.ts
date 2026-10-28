@@ -5,7 +5,7 @@ declare global {
 }
 
 export interface RazorpayCheckoutOptions {
-  amount: number // In Rupees (e.g. 49, 79, 99, 149, 179)
+  amount: number // In Rupees — must be a price from src/constants/pricing.ts
   description?: string
   ticketId?: string
   planType?: number
@@ -71,7 +71,7 @@ export async function openRazorpayCheckout(opts: RazorpayCheckoutOptions): Promi
         amount,
         currency: 'INR',
         ticketId,
-        receipt: `kiosk_${ticketId || Date.now()}`,
+        planType,
       }),
     })
 
@@ -85,8 +85,10 @@ export async function openRazorpayCheckout(opts: RazorpayCheckoutOptions): Promi
     // Step 2: Open Razorpay Checkout modal
     const keyId =
       orderData.key_id ||
-      (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_RAZORPAY_KEY_ID) ||
-      'rzp_live_TmAYEziEgmPCkU'
+      (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_RAZORPAY_KEY_ID)
+    if (!keyId) {
+      throw new Error('Online payments are not configured')
+    }
 
     const rzpOptions: any = {
       key: keyId,
