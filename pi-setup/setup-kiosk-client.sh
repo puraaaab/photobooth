@@ -122,7 +122,7 @@ start_browser() {
         --no-first-run --no-default-browser-check \
         --touch-events=enabled --disable-pinch --overscroll-history-navigation=0 --disable-translate \
         --check-for-update-interval=31536000 --disable-session-crashed-bubble \
-        --disable-features=Translate,BraveRewards,BraveWallet,BraveNews \
+        --disable-features=Translate,BraveRewards,BraveWallet,BraveNews,LocalNetworkAccessChecks,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights \
         "http://${SERVER}/?view=booth&cam=local" >/dev/null 2>&1 &
 }
 

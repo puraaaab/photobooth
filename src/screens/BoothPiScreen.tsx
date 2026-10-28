@@ -956,7 +956,57 @@ export function BoothPiScreen() {
     }
   }
 
+  // ─── Staff exit (touch screens have no keyboard to leave kiosk mode) ──────
+  // Press and hold the camera logo for 3 s → staff PIN keypad → the Pi closes the kiosk browser
+  // and keeps it closed until `booth-on`. The PIN is checked by the laptop server.
+  const [showStaffExit, setShowStaffExit] = useState(false)
+  const [exitPin, setExitPin] = useState('')
+  const [exitMsg, setExitMsg] = useState('')
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const longPressFired = useRef(false)
+  const startLongPress = () => {
+    longPressFired.current = false
+    if (longPressTimer.current) clearTimeout(longPressTimer.current)
+    longPressTimer.current = setTimeout(() => {
+      longPressFired.current = true
+      setExitPin('')
+      setExitMsg('')
+      setShowStaffExit(true)
+    }, 3000)
+  }
+  const cancelLongPress = () => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current)
+    longPressTimer.current = null
+  }
+  const submitStaffExit = useCallback(async (pin: string) => {
+    setExitMsg('Checking…')
+    try {
+      const r = await fetch('http://localhost:8081/kiosk/off', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin }),
+        signal: AbortSignal.timeout(8000),
+      })
+      const d = await r.json().catch(() => ({}))
+      if (r.ok) {
+        setExitMsg('Closing booth… (run booth-on or tap the Booth ON icon to return)')
+      } else {
+        setExitPin('')
+        setExitMsg(d.error || 'Not allowed')
+      }
+    } catch {
+      setExitPin('')
+      setExitMsg('Camera service not reachable on this Pi')
+    }
+  }, [])
+  const handleExitKey = useCallback((key: string) => {
+    if (key === 'backspace') { setExitPin(p => p.slice(0, -1)); return }
+    if (key === 'confirm') { if (exitPin.length >= 4) submitStaffExit(exitPin); return }
+    if (/^\d$/.test(key) && exitPin.length < 8) setExitPin(p => p + key)
+  }, [exitPin, submitStaffExit])
+
   const handleIdleTouch = () => {
+    if (longPressFired.current) { longPressFired.current = false; return }
     const doc = document as any
     const docEl = document.documentElement as any
     if (!doc.fullscreenElement && !doc.webkitFullscreenElement) {
@@ -969,6 +1019,28 @@ export function BoothPiScreen() {
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div style={styles.root}>
+      {showStaffExit && (
+        <div
+          onClick={(e) => { e.stopPropagation(); setShowStaffExit(false) }}
+          style={{ position: 'absolute', inset: 0, zIndex: 500, background: 'rgba(20,4,10,0.82)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ background: '#FFF8F4', borderRadius: 18, padding: '12px 14px 16px', width: 'min(380px, 92vw)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 13, color: '#4A0418' }}>STAFF · CLOSE BOOTH</span>
+              <button onClick={() => setShowStaffExit(false)} style={{ background: 'none', border: 'none', padding: 6 }} aria-label="Cancel"><X size={20} /></button>
+            </div>
+            <div style={{ display: 'flex', gap: 8, margin: '2px 0' }}>
+              {Array.from({ length: Math.max(4, exitPin.length) }).map((_, i) => (
+                <span key={i} style={{ width: 14, height: 14, borderRadius: '50%', background: i < exitPin.length ? '#C71B4D' : '#E8D5D9' }} />
+              ))}
+            </div>
+            {exitMsg && <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: exitMsg.startsWith('Closing') ? '#16a34a' : '#b91c1c', textAlign: 'center' }}>{exitMsg}</span>}
+            <div style={{ width: '100%' }}>
+              <Numpad onKey={handleExitKey} />
+            </div>
+          </div>
+        </div>
+      )}
       {/* Floating Action Bar: visible on idle, ticket_entry, and session_start */}
       {(state === 'idle' || state === 'ticket_entry' || state === 'session_start') && (
         <div
@@ -1173,7 +1245,14 @@ export function BoothPiScreen() {
             <div style={styles.blob2} />
 
             <div style={styles.idleContent}>
-              <div style={styles.cameraIcon}>
+              <div
+                style={styles.cameraIcon}
+                onPointerDown={startLongPress}
+                onPointerUp={cancelLongPress}
+                onPointerLeave={cancelLongPress}
+                onPointerCancel={cancelLongPress}
+                onContextMenu={(e) => e.preventDefault()}
+              >
                 <Camera size={76} strokeWidth={1.5} color="#C71B4D" />
               </div>
               <div style={styles.idleTitle}>PHOTOBOOTH</div>

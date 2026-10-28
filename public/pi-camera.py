@@ -19,6 +19,7 @@ HTTP API (unchanged)
 import glob
 import http.server
 import io
+import json
 import os
 import shutil
 import socketserver
@@ -345,6 +346,8 @@ class StreamHandler(http.server.BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', '*')
+        # The booth page is served by the laptop but calls this Pi's localhost; browsers ask first
+        self.send_header('Access-Control-Allow-Private-Network', 'true')
         self.end_headers()
 
     def do_GET(self):
@@ -454,6 +457,8 @@ class CaptureHandler(http.server.BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', '*')
+        # The booth page is served by the laptop but calls this Pi's localhost; browsers ask first
+        self.send_header('Access-Control-Allow-Private-Network', 'true')
         self.end_headers()
 
     def do_GET(self):
@@ -477,8 +482,53 @@ class CaptureHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path.startswith('/capture'):
             self.handle_capture()
+        elif self.path.startswith('/kiosk/off'):
+            self.handle_kiosk_off()
         else:
             self.send_error(404, "Not Found")
+
+    def _json(self, code, body):
+        data = json.dumps(body).encode('utf-8')
+        self.send_response(code)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def handle_kiosk_off(self):
+        """Touch-screen exit: the booth page sends the staff PIN; the laptop server checks it (with its
+        brute-force lockout). Only accepted from this Pi itself, so nobody on the Wi-Fi can close the booth."""
+        if self.client_address[0] not in ('127.0.0.1', '::1'):
+            return self._json(403, {'error': 'Only the booth screen itself can close the kiosk'})
+        try:
+            length = int(self.headers.get('Content-Length') or 0)
+            pin = str(json.loads(self.rfile.read(min(length, 1024)) or b'{}').get('pin', ''))
+        except Exception:
+            pin = ''
+        if not pin.isdigit() or not 4 <= len(pin) <= 8:
+            return self._json(400, {'error': 'Enter the staff PIN'})
+        server = _server_base()
+        if not server:
+            return self._json(503, {'error': 'Laptop not found, cannot check the PIN'})
+        import urllib.request
+        import urllib.error
+        try:
+            req = urllib.request.Request(server + '/api/staff/verify', data=b'', method='POST', headers={'X-Staff-Pin': pin})
+            urllib.request.urlopen(req, timeout=5).read()
+        except urllib.error.HTTPError:
+            return self._json(403, {'error': 'Wrong PIN'})
+        except Exception:
+            return self._json(503, {'error': 'Laptop unreachable, cannot check the PIN'})
+
+        home = os.path.expanduser('~')
+        open(os.path.join(home, '.photobooth-kiosk-off'), 'a').close()   # watchdog: stay closed
+        self._json(200, {'success': True})
+
+        def close_browser():
+            time.sleep(0.5)  # let the response reach the page first
+            subprocess.run(['pkill', '-f', 'user-data-dir=' + os.path.join(home, '.config', 'photobooth-kiosk')], check=False)
+        threading.Thread(target=close_browser, daemon=True).start()
 
     def handle_capture(self):
         try:
@@ -511,6 +561,18 @@ class CaptureHandler(http.server.BaseHTTPRequestHandler):
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+
+def _server_base():
+    """Laptop server URL from SERVER_URL or ~/.photobooth-server (written by find-server.sh)."""
+    target = os.environ.get('SERVER_URL', '').strip()
+    if not target:
+        try:
+            with open(os.path.expanduser('~/.photobooth-server')) as f:
+                target = 'http://' + f.read().strip()
+        except OSError:
+            return ''
+    return target.rstrip('/')
+
 
 def _announce_loop():
     """Tell the laptop where this Pi is (every 10 s), so it never has to scan the network for us.

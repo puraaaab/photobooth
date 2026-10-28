@@ -16,7 +16,7 @@ import { ticketRouter } from './routes/tickets'
 import { paymentRouter, startPaymentReconciler } from './routes/payments'
 import { printRouter, autoSetupPrinter } from './routes/print'
 import { TicketManager } from './ticketManager'
-import { isAllowedOrigin, initStaffPin, requireStaff, clientIp } from './security'
+import { isAllowedOrigin, initStaffPin, requireStaff, clientIp, checkStaffPin, isStaff } from './security'
 import { getAllLocalSubnetPrefixes, getPrimaryLanAddress } from './network'
 export { getAllLocalSubnetPrefixes }
 
@@ -286,7 +286,11 @@ export async function startServer(dataPath: string): Promise<void> {
   })
 
   // Lets guest-facing stations check an attendant's PIN (reprints, cash upgrades) without exposing it
-  app.post('/api/staff/verify', requireStaff, (_req: Request, res: Response) => {
+  // When a PIN is supplied it is always checked, even from the laptop itself — callers use this to
+  // validate what an attendant typed (iPad reprints/upgrades, Pi touch-screen kiosk exit).
+  app.post('/api/staff/verify', (req: Request, res: Response) => {
+    const ok = req.headers['x-staff-pin'] !== undefined ? checkStaffPin(req) : isStaff(req)
+    if (!ok) return res.status(403).json({ error: 'Wrong staff PIN', code: 'STAFF_REQUIRED' })
     res.json({ success: true })
   })
 
