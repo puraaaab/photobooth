@@ -318,16 +318,43 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
     onNewSession()
   }, [session?.ticketId, session?.id, session?.strips?.length, copies, onNewSession])
 
-  // Copies multiply paper used, so they are capped by what the plan paid for:
-  // e.g. ₹99 = 2 strips → 2 designed strips allow 1 copy, 1 strip allows 2 copies.
-  const maxCopiesForPlan = Math.max(1, Math.floor(planStripLimit / Math.max(1, Math.min(strips.length, selectedStripIndices.length || strips.length))))
-  const handleCopiesChange = (newCopies: number) => {
-    const clamped = Math.max(1, Math.min(maxCopiesForPlan, 10, newCopies))
-    if (newCopies > clamped) {
-      toast(`Your plan covers ${planStripLimit} strips. Ask the attendant for extra copies.`, 'info')
+  // ─── Copies are paid paper ─────────────────────────────────────────────────
+  // The plan pays for a number of strips = A5 sheets × 2. More copies than that opens the same
+  // paid unlock as extra strips ("+₹79 per extra sheet"), instead of printing for free.
+  const [upsellReason, setUpsellReason] = useState<'strips' | 'copies'>('strips')
+  const [pendingCopies, setPendingCopies] = useState(1)
+  const stripsPerCopy = (upgradedPlan || strips.length <= planStripLimit)
+    ? Math.max(1, strips.length)
+    : Math.max(1, selectedStripIndices.length || Math.min(strips.length, planStripLimit))
+  // Physical output the plan must cover. On A5 two-up a single strip still uses a whole sheet.
+  const stripsNeededFor = (copiesN: number) => paperLayout === 'a5-2'
+    ? Math.ceil((stripsPerCopy * copiesN) / 2) * 2
+    : stripsPerCopy * copiesN
+  const extraSheetsFor = (copiesN: number) => Math.max(0, Math.ceil((stripsNeededFor(copiesN) - planStripLimit) / 2))
+  const maxCopiesForPlan = Math.max(1, Math.floor(planStripLimit / stripsPerCopy))
+
+  /** Opens the paid unlock for `copiesN` copies. Returns false when the copies are already paid for. */
+  const offerCopiesUnlock = (copiesN: number): boolean => {
+    const extra = extraSheetsFor(copiesN)
+    if (extra === 0) return false
+    const idx = planOffers.findIndex(o => o.extraSheets >= extra)
+    if (idx === -1) {
+      toast(`That needs ${stripsNeededFor(copiesN)} strips — more than the largest plan. Please ask the attendant.`, 'info')
+      return true
     }
-    setCopies(clamped)
-    setPrintSettings({ copies: clamped })
+    setPendingCopies(copiesN)
+    setUpsellReason('copies')
+    setUpsellExceededCount(stripsNeededFor(copiesN) - planStripLimit)
+    setSelectedUpsellTier(idx === 0 ? 'tier1' : 'tier2')
+    setShowUpsellModal(true)
+    return true
+  }
+
+  const handleCopiesChange = (newCopies: number) => {
+    const n = Math.max(1, Math.min(10, newCopies))
+    if (n > copies && offerCopiesUnlock(n)) return // copies change only after payment
+    setCopies(n)
+    setPrintSettings({ copies: n })
   }
 
   const getPhotoForSlot = useCallback(
@@ -1631,9 +1658,17 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
       const activePlan = opts?.overridePlan || effectivePlan
       const limit = opts?.maxStrips !== undefined ? opts.maxStrips : (PLAN_STRIP_LIMITS[activePlan] ?? null)
 
+      // 0a. Copies beyond what the plan paid for → paid unlock (not a free print)
+      if (opts?.overridePlan === undefined && opts?.maxStrips === undefined && extraSheetsFor(copies) > 0) {
+        setPrinting(false)
+        offerCopiesUnlock(copies)
+        return
+      }
+
       // 0. Plan strip limit check — show upsell if exceeding plan (unless user explicitly prints chosen selection or upgraded)
       if (!opts?.allowSelected && opts?.maxStrips === undefined && opts?.overridePlan === undefined && limit !== null && strips.length > limit && !upgradedPlan && planOffers.length > 0) {
         setUpsellExceededCount(strips.length - limit)
+        setUpsellReason('strips')
         setShowUpsellModal(true)
         setPrinting(false)
         return
@@ -1922,7 +1957,9 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
   }, [
     session, strips, copies, paperLayout, paperSaving, settings, physicalSheets,
     renderStripCanvas, renderA5DuplexCanvas, render4x6DuplexCanvas, renderDyeSub4x5Canvas, renderDyeSub4x6Canvas, renderA4SheetCanvas,
-    effectivePlan, planOffers.length, decrementRollCount, recordPrintJob, toast, sendToNetworkPrinter, ensureSharedExport
+    effectivePlan, planOffers.length, decrementRollCount, recordPrintJob, toast, sendToNetworkPrinter, ensureSharedExport,
+    // copies/plan guard inputs (offerCopiesUnlock / extraSheetsFor read these)
+    upgradedPlan, selectedStripIndices, planStripLimit,
   ])
 
   // ─── Plan Upgrade and Partial Print Handlers ────────────────────────────────
@@ -1958,20 +1995,32 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
     setUpgradedPlan(target)
     setPaperLayout(PLAN_LAYOUTS[target])
     setShowUpsellModal(false)
+    if (upsellReason === 'copies') {
+      setCopies(pendingCopies)
+      setPrintSettings({ copies: pendingCopies })
+      toast(`Paid ✓ ${pendingCopies} copies unlocked — tap PRINT.`, 'success')
+      return true
+    }
     toast(`Plan upgraded to ₹${target} via ${paymentMethod}! Printing all your strips now...`, 'success')
     setTimeout(() => {
       handlePrint({ overridePlan: target })
     }, 250)
     return true
-  }, [currentUpgrade, session?.ticketId, resolvedTicket?.paymentAmount, resolvedTicket?.planType, handlePrint, toast])
+  }, [currentUpgrade, session?.ticketId, resolvedTicket?.paymentAmount, resolvedTicket?.planType, handlePrint, toast, upsellReason, pendingCopies, setPrintSettings])
 
   const handlePrintOnlyPaidStrips = useCallback(() => {
     setShowUpsellModal(false)
+    if (upsellReason === 'copies') {
+      setCopies(maxCopiesForPlan)
+      setPrintSettings({ copies: maxCopiesForPlan })
+      toast(`Kept ${maxCopiesForPlan} cop${maxCopiesForPlan === 1 ? 'y' : 'ies'} (included in your plan).`, 'info')
+      return
+    }
     toast(`Printing your chosen ${selectedStripIndices.length} strips...`, 'info')
     setTimeout(() => {
       handlePrint({ allowSelected: true })
     }, 250)
-  }, [selectedStripIndices.length, handlePrint, toast])
+  }, [selectedStripIndices.length, handlePrint, toast, upsellReason, maxCopiesForPlan, setPrintSettings])
 
   // ─── Interactive Miniature Strip Preview Component ────────────────────────
   // ─── Interactive Miniature Strip Preview Component ────────────────────────
@@ -4110,13 +4159,16 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
               </div>
 
               <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 21, color: '#FFFFFF', marginBottom: 6, fontWeight: 800 }}>
-                Unlock All {strips.length} Strips
+                {upsellReason === 'copies' ? `Unlock ${pendingCopies} Copies` : `Unlock All ${strips.length} Strips`}
               </h3>
 
               <p style={{ fontFamily: 'var(--font-body)', fontSize: 13, color: 'rgba(255, 255, 255, 0.85)', lineHeight: 1.45, marginBottom: 16 }}>
-                You paid for <span style={{ color: '#F7EAEF', fontWeight: 700 }}>₹{effectivePlan} ({planStripLimit} strips)</span>, but created <span style={{ color: '#fff', fontWeight: 700 }}>{strips.length} strips</span>.
+                You paid for <span style={{ color: '#F7EAEF', fontWeight: 700 }}>₹{effectivePlan} ({planStripLimit} strips)</span>, but{' '}
+                {upsellReason === 'copies'
+                  ? <><span style={{ color: '#fff', fontWeight: 700 }}>{pendingCopies} copies need {stripsNeededFor(pendingCopies)} strips</span>.</>
+                  : <>created <span style={{ color: '#fff', fontWeight: 700 }}>{strips.length} strips</span>.</>}
                 <br />
-                Choose your upgrade plan below to unlock all strips:
+                {upsellReason === 'copies' ? 'Unlock the extra strips to print your copies:' : 'Choose your upgrade plan below to unlock all strips:'}
               </p>
 
               {/* Upgrade Tier Options */}
@@ -4491,7 +4543,9 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
                     cursor: 'pointer',
                   }}
                 >
-                  No thanks, print my chosen {selectedStripIndices.length} strips
+                  {upsellReason === 'copies'
+                    ? `No thanks, keep ${maxCopiesForPlan} cop${maxCopiesForPlan === 1 ? 'y' : 'ies'}`
+                    : `No thanks, print my chosen ${selectedStripIndices.length} strips`}
                 </button>
               </div>
             </motion.div>
