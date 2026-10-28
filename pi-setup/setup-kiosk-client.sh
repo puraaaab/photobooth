@@ -89,7 +89,17 @@ xset s off 2>/dev/null || true
 xset s noblank 2>/dev/null || true
 xset -dpms 2>/dev/null || true
 
-BROWSER_BIN=$(which chromium-browser 2>/dev/null || which chromium 2>/dev/null || echo chromium-browser)
+# Browser: $KIOSK_BROWSER if set, else Brave, else Chromium (all accept the same kiosk flags)
+BROWSER_BIN="${KIOSK_BROWSER:-}"
+for candidate in brave-browser brave chromium-browser chromium; do
+    [ -n "$BROWSER_BIN" ] && break
+    BROWSER_BIN=$(command -v "$candidate" 2>/dev/null)
+done
+if [ -z "$BROWSER_BIN" ]; then
+    echo "[kiosk] No Brave/Chromium found - install one (brave-browser or chromium-browser)"
+    exit 1
+fi
+echo "[kiosk] Using browser: $BROWSER_BIN"
 
 paused() { [ -f "$PAUSE_FILE" ]; }
 
@@ -107,9 +117,12 @@ start_browser() {
     pkill -f "$MATCH" 2>/dev/null
     sleep 1
     # cam=local: the booth page uses this Pi's own camera at localhost:8080
+    # Brave extras (ignored by Chromium): no first-run, Rewards or Wallet popups over the booth
     "$BROWSER_BIN" --user-data-dir="$PROFILE" --kiosk --noerrdialogs --disable-infobars \
+        --no-first-run --no-default-browser-check \
         --touch-events=enabled --disable-pinch --overscroll-history-navigation=0 --disable-translate \
-        --check-for-update-interval=31536000 --disable-session-crashed-bubble --disable-features=Translate \
+        --check-for-update-interval=31536000 --disable-session-crashed-bubble \
+        --disable-features=Translate,BraveRewards,BraveWallet,BraveNews \
         "http://${SERVER}/?view=booth&cam=local" >/dev/null 2>&1 &
 }
 
