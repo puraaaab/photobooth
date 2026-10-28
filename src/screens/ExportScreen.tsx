@@ -1553,11 +1553,12 @@ export function ExportScreen({ onBack, onNewSession }: ExportScreenProps) {
     let alive = true
     const poll = async () => {
       try {
-        const r = await fetch(`http://${window.location.hostname || 'localhost'}:3847/api/print/status`, { signal: AbortSignal.timeout(6000) })
+        const r = await fetch(`http://${window.location.hostname || 'localhost'}:3847/api/print/status`, { signal: AbortSignal.timeout(12000) })
         const d = await r.json()
-        if (alive) setNetworkPrinter(d.reachable ? { reachable: true, model: d.printer?.model, state: d.printer?.state, ink: d.printer?.ink } : null)
+        // Network mode whenever a printer is configured; a sleeping printer is woken by the job itself
+        if (alive) setNetworkPrinter(d.mode === 'network' ? { reachable: true, model: d.printer?.model, state: d.printer?.state, ink: d.printer?.ink } : null)
       } catch {
-        if (alive) setNetworkPrinter(null)
+        // Laptop briefly unreachable: keep the last known mode instead of flipping to AirPrint
       }
     }
     poll()

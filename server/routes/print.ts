@@ -31,17 +31,22 @@ async function currentPrinter(force = false): Promise<PrinterInfo | null> {
   const cfg = loadPrinterConfig(getDataPath())
   if (!cfg) return null
   if (!force && cachedInfo?.uri === cfg.uri && Date.now() - cachedAt < 5000) return cachedInfo
-  try {
-    cachedInfo = await getPrinterInfo(cfg.uri)
-    cachedAt = Date.now()
-    lastError = ''
-  } catch (err: any) {
-    // The printer's DHCP address may have changed: look for the same model elsewhere on the LAN
-    lastError = err?.message || 'unreachable'
-    cachedInfo = null
-    const moved = await rediscover(cfg.makeAndModel)
-    if (moved) cachedInfo = moved
+  // Printers in deep sleep (e.g. Brother lasers) take several seconds to answer the first request,
+  // and a print job has to wait for them anyway — so be patient, and retry once.
+  for (let attempt = 0; attempt < (force ? 2 : 1); attempt++) {
+    try {
+      cachedInfo = await getPrinterInfo(cfg.uri, 8000)
+      cachedAt = Date.now()
+      lastError = ''
+      return cachedInfo
+    } catch (err: any) {
+      lastError = err?.message || 'unreachable'
+    }
   }
+  cachedInfo = null
+  // The printer's DHCP address may have changed: look for the same model elsewhere (in the background,
+  // so status checks stay fast)
+  if (!discovering) rediscover(cfg.makeAndModel).then(moved => { if (moved) cachedInfo = moved }).catch(() => {})
   return cachedInfo
 }
 
@@ -77,7 +82,9 @@ printRouter.get('/status', async (_req: Request, res: Response) => {
   res.json({
     configured: Boolean(cfg),
     reachable: Boolean(info),
-    mode: info ? 'network' : 'airprint',
+    // A configured printer stays in network mode even while asleep/unreachable: falling back to the
+    // iOS AirPrint dialog would let guests change the copy count.
+    mode: cfg ? 'network' : 'airprint',
     printer: info ? {
       model: info.makeAndModel, name: info.name, state: info.state, stateReasons: info.stateReasons,
       ink: info.ink, supportsA5: info.media.includes('iso_a5_148x210mm'),

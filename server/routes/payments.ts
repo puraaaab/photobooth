@@ -84,8 +84,8 @@ function applyPaymentToTicket(ticketId: string, paymentId: string, paidRupees: n
 
 // ─── Pending payments (watched by the reconciler until paid or expired) ──────
 interface PendingPayment {
-  kind: 'order' | 'qr'
-  id: string                 // Razorpay order_… or qr_…
+  kind: 'order' | 'qr' | 'link'
+  id: string                 // Razorpay order_…, qr_… or plink_…
   amount: number             // ₹
   ticketId: string
   planType: number
@@ -94,6 +94,7 @@ interface PendingPayment {
   status: 'pending' | 'paid' | 'expired'
   paymentId?: string
   imageUrl?: string
+  payUrl?: string
 }
 const PENDING_TTL_MS = 20 * 60 * 1000
 const pending = new Map<string, PendingPayment>()
@@ -135,6 +136,15 @@ async function checkPending(p: PendingPayment): Promise<void> {
     const list: any = await (razorpayInstance as any).qrCode.fetchAllPayments(p.id, { count: 10 })
     const hit = (list?.items || []).find((x: any) => x.status === 'captured' || x.status === 'authorized')
     if (hit && Math.round(Number(hit.amount) / 100) >= p.amount) markPaid(p, hit.id)
+  } else if (p.kind === 'link') {
+    const link: any = await (razorpayInstance as any).paymentLink.fetch(p.id)
+    if (link?.status === 'paid' || Number(link?.amount_paid) >= p.amount * 100) {
+      const pay = (link.payments || []).find((x: any) => x.status === 'captured') || (link.payments || [])[0]
+      markPaid(p, pay?.payment_id || `link:${p.id}`)
+    } else if (link?.status === 'expired' || link?.status === 'cancelled') {
+      p.status = 'expired'
+      persistPending()
+    }
   } else {
     const order: any = await razorpayInstance.orders.fetch(p.id)
     if (order.status === 'paid') {
@@ -316,16 +326,39 @@ paymentRouter.post('/payments/upi-qr', async (req: Request, res: Response) => {
     persistPending()
     res.json({ id: qr.id, imageUrl: qr.image_url, amount: rupees, expiresAt: entry.createdAt + PENDING_TTL_MS })
   } catch (err: any) {
-    // Usually: QR Codes not enabled on the Razorpay account → the UI falls back to Checkout
-    console.warn('[Payments] QR create failed:', err?.error?.description || err?.message)
-    res.status(502).json({ error: err?.error?.description || 'Could not create UPI QR', code: 'QR_UNAVAILABLE' })
+    // QR Codes is a feature Razorpay enables per account. Fall back to a Payment Link for the exact
+    // amount: its QR opens Razorpay's page in any phone camera / UPI app and is confirmed the same way.
+    console.warn('[Payments] QR Codes unavailable, using Payment Link:', err?.error?.description || err?.message)
+    try {
+      const link: any = await (razorpayInstance as any).paymentLink.create({
+        amount: rupees * 100,
+        currency: 'INR',
+        accept_partial: false,
+        description: ticketId ? 'Photobooth upgrade' : 'Photobooth pass',
+        expire_by: Math.floor((Date.now() + PENDING_TTL_MS) / 1000),
+        reminder_enable: false,
+        notify: { sms: false, email: false },
+        notes: { ticketId: ticketId || '', planType: plan ? String(plan) : '', source: 'Photobooth Kiosk' },
+      })
+      const entry: PendingPayment = {
+        kind: 'link', id: link.id, amount: rupees, ticketId: ticketId || '', planType: plan,
+        purpose: VALID_PLANS.has(rupees) && !ticketId ? 'ticket' : 'upgrade',
+        createdAt: Date.now(), status: 'pending', payUrl: link.short_url,
+      }
+      pending.set(link.id, entry)
+      persistPending()
+      return res.json({ id: link.id, payUrl: link.short_url, amount: rupees, expiresAt: entry.createdAt + PENDING_TTL_MS, kind: 'link' })
+    } catch (err2: any) {
+      console.warn('[Payments] Payment Link create failed:', err2?.error?.description || err2?.message)
+      res.status(502).json({ error: err2?.error?.description || 'Could not create UPI payment', code: 'QR_UNAVAILABLE' })
+    }
   }
 })
 
 // GET /api/payments/upi-qr/:id → { status: pending | paid | expired, paymentId? }
 paymentRouter.get('/payments/upi-qr/:id', async (req: Request, res: Response) => {
   const p = pending.get(String(req.params.id))
-  if (!p || p.kind !== 'qr') return res.status(404).json({ error: 'Unknown QR' })
+  if (!p || p.kind === 'order') return res.status(404).json({ error: 'Unknown QR' })
   if (p.status === 'pending') await checkPending(p).catch(() => {})
   res.json({ status: p.status, paymentId: p.paymentId, amount: p.amount })
 })

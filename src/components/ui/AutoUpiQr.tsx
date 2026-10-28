@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { CheckCircle2, Loader2 } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
 
 const SERVER_BASE = typeof window !== 'undefined' && window.location.hostname
   ? `http://${window.location.hostname}:3847`
@@ -21,7 +22,8 @@ interface AutoUpiQrProps {
  * confirmed automatically — nobody has to check a phone and tap "received".
  */
 export function AutoUpiQr({ amount, ticketId, planType, size = 200, onPaid, fallback }: AutoUpiQrProps) {
-  const [qr, setQr] = useState<{ id: string; imageUrl: string; expiresAt: number } | null>(null)
+  // imageUrl: Razorpay UPI QR image · payUrl: Razorpay payment link (used when QR Codes isn't enabled)
+  const [qr, setQr] = useState<{ id: string; imageUrl?: string; payUrl?: string; expiresAt: number } | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'paid' | 'expired' | 'unavailable'>('loading')
   const onPaidRef = useRef(onPaid)
   onPaidRef.current = onPaid
@@ -67,9 +69,14 @@ export function AutoUpiQr({ amount, ticketId, planType, size = 200, onPaid, fall
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
       <div style={{ width: size, height: size, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', borderRadius: 12, overflow: 'hidden' }}>
         {state === 'loading' && <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', color: '#6D0626' }} />}
-        {(state === 'ready' || state === 'expired') && qr && (
+        {(state === 'ready' || state === 'expired') && qr?.imageUrl && (
           // Razorpay's hosted QR image contains the exact amount + a unique reference
           <img src={qr.imageUrl} alt={`Scan to pay ₹${amount}`} style={{ width: '100%', height: '100%', objectFit: 'contain', opacity: state === 'expired' ? 0.25 : 1 }} />
+        )}
+        {(state === 'ready' || state === 'expired') && !qr?.imageUrl && qr?.payUrl && (
+          <div style={{ opacity: state === 'expired' ? 0.25 : 1 }}>
+            <QRCodeSVG value={qr.payUrl} size={size - 16} level="M" includeMargin={false} />
+          </div>
         )}
         {state === 'paid' && <CheckCircle2 size={72} color="#16a34a" />}
       </div>
@@ -77,6 +84,7 @@ export function AutoUpiQr({ amount, ticketId, planType, size = 200, onPaid, fall
         {state === 'paid' ? `₹${amount} received ✓`
           : state === 'expired' ? 'QR expired — close and try again'
           : state === 'loading' ? 'Creating secure QR…'
+          : qr?.payUrl ? `Scan with phone camera · pay ₹${amount} by UPI · confirms automatically`
           : `Scan & pay ₹${amount} · confirms automatically`}
       </span>
     </div>
