@@ -106,6 +106,11 @@ export function initStaffPin(dataDir: string): string {
 
 const pinFailures = new Map<string, { count: number; until: number }>()
 
+/** Number of digits only (not the PIN), so keypads can show the right number of dots. */
+export function getStaffPinLength(): number {
+  return staffPin.length
+}
+
 export function checkStaffPin(req: Request): boolean {
   const supplied = req.headers['x-staff-pin']
   const pin = (Array.isArray(supplied) ? supplied[0] : supplied)?.trim()

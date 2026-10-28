@@ -962,6 +962,15 @@ export function BoothPiScreen() {
   const [showStaffExit, setShowStaffExit] = useState(false)
   const [exitPin, setExitPin] = useState('')
   const [exitMsg, setExitMsg] = useState('')
+  // Digit count of the staff PIN (from the server) → that many dots + auto-submit on the last digit
+  const [pinLength, setPinLength] = useState(6)
+  useEffect(() => {
+    if (!showStaffExit) return
+    fetch(`${MAIN_SERVER_URL}/api/staff/pin-length`, { signal: AbortSignal.timeout(4000) })
+      .then(r => r.json())
+      .then(d => { if (Number.isInteger(d?.length) && d.length >= 4 && d.length <= 8) setPinLength(d.length) })
+      .catch(() => {})
+  }, [showStaffExit])
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const longPressFired = useRef(false)
   const startLongPress = () => {
@@ -1002,8 +1011,12 @@ export function BoothPiScreen() {
   const handleExitKey = useCallback((key: string) => {
     if (key === 'backspace') { setExitPin(p => p.slice(0, -1)); return }
     if (key === 'confirm') { if (exitPin.length >= 4) submitStaffExit(exitPin); return }
-    if (/^\d$/.test(key) && exitPin.length < 8) setExitPin(p => p + key)
-  }, [exitPin, submitStaffExit])
+    if (/^\d$/.test(key) && exitPin.length < pinLength) {
+      const next = exitPin + key
+      setExitPin(next)
+      if (next.length === pinLength) submitStaffExit(next)
+    }
+  }, [exitPin, pinLength, submitStaffExit])
 
   const handleIdleTouch = () => {
     if (longPressFired.current) { longPressFired.current = false; return }
@@ -1030,7 +1043,7 @@ export function BoothPiScreen() {
               <button onClick={() => setShowStaffExit(false)} style={{ background: 'none', border: 'none', padding: 6 }} aria-label="Cancel"><X size={20} /></button>
             </div>
             <div style={{ display: 'flex', gap: 8, margin: '2px 0' }}>
-              {Array.from({ length: Math.max(4, exitPin.length) }).map((_, i) => (
+              {Array.from({ length: pinLength }).map((_, i) => (
                 <span key={i} style={{ width: 14, height: 14, borderRadius: '50%', background: i < exitPin.length ? '#C71B4D' : '#E8D5D9' }} />
               ))}
             </div>
